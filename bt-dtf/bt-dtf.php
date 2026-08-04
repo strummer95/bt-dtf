@@ -3,13 +3,13 @@
 Plugin Name: BT Transfers
 Plugin URI: https://boomerts.com
 Description: Boomer T's DTF transfer + gang sheet builder — settings and pricing tiers, sheet upload/AJAX, production files on the order screen and admin email, browser-side PDF generation, the Awaiting Items tracking flag, the DTF shipping method, and Save & Resume.
-Version: 0.3.3
+Version: 0.4.0
 Author: Duck and Rabbit Co.
 */
 
 if (!defined('ABSPATH')) exit;
 
-define('BTDTF_VERSION', '0.3.3');
+define('BTDTF_VERSION', '0.4.0');
 define('BTDTF_DIR',  plugin_dir_path(__FILE__));
 define('BTDTF_URL',  plugin_dir_url(__FILE__));
 define('BTDTF_FILE', __FILE__);
@@ -30,6 +30,7 @@ define('BTDTF_FILE', __FILE__);
 require_once BTDTF_DIR . 'includes/backend.php';    // settings, AJAX, Woo hooks, PDF, Awaiting Items
 require_once BTDTF_DIR . 'includes/shipping.php';   // DTF Sheet Shipping method
 require_once BTDTF_DIR . 'includes/save.php';       // Save & Resume
+require_once BTDTF_DIR . 'includes/frontend.php';   // [gang_sheet_builder] builder UI
 require_once BTDTF_DIR . 'includes/updater.php';
 require_once BTDTF_DIR . 'includes/admin.php';      // status + check-for-updates page
 
@@ -43,6 +44,7 @@ add_action('admin_notices', function () {
     if (function_exists('btgsb_defaults'))              $waiting[] = 'DTF Studio — Backend';
     if (function_exists('btgsb_shipping_init'))         $waiting[] = 'DTF Studio - Shipping';
     if (function_exists('btgsb_ajax_save_sheet_email')) $waiting[] = 'DTF Studio - Save';
+    if (function_exists('btgsb_render_builder'))        $waiting[] = 'DTF Studio - Frontend';
     if (!$waiting) return;
 
     echo '<div class="notice notice-info"><p><strong>BT Transfers is installed and running alongside your snippets.</strong> '

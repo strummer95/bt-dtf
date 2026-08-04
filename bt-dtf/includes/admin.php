@@ -42,6 +42,7 @@ function btdtf_admin_status_page() {
         'Backend (settings, uploads, order screen)' => !function_exists('btgsb_defaults'),
         'Shipping (DTF Sheet Shipping method)'      => !function_exists('btgsb_shipping_init'),
         'Save & Resume'                             => !function_exists('btgsb_ajax_save_sheet_email'),
+        'Frontend (the builder UI itself)'          => !function_exists('btgsb_render_builder'),
     );
 
     $product_id = (int) get_option('btgsb_product_id', 0);
@@ -92,7 +93,6 @@ function btdtf_admin_status_page() {
       <p style="color:#666;max-width:680px">
         A module stands down while its old snippet is active so nothing runs twice.
         Deactivate the snippet in WPCode and the plugin picks it up on the next page load.
-        The Frontend snippet (the builder UI itself) is not part of the plugin yet and should stay active.
       </p>
 
       <form method="post" style="margin-top:16px;">
