@@ -3,13 +3,13 @@
 Plugin Name: BT Transfers
 Plugin URI: https://boomerts.com
 Description: Boomer T's DTF transfer + gang sheet builder — settings and pricing tiers, sheet upload/AJAX, production files on the order screen and admin email, browser-side PDF generation, the Awaiting Items tracking flag, the DTF shipping method, and Save & Resume.
-Version: 0.3.1
+Version: 0.3.2
 Author: Duck and Rabbit Co.
 */
 
 if (!defined('ABSPATH')) exit;
 
-define('BTDTF_VERSION', '0.3.1');
+define('BTDTF_VERSION', '0.3.2');
 define('BTDTF_DIR',  plugin_dir_path(__FILE__));
 define('BTDTF_URL',  plugin_dir_url(__FILE__));
 define('BTDTF_FILE', __FILE__);
@@ -31,6 +31,7 @@ require_once BTDTF_DIR . 'includes/backend.php';    // settings, AJAX, Woo hooks
 require_once BTDTF_DIR . 'includes/shipping.php';   // DTF Sheet Shipping method
 require_once BTDTF_DIR . 'includes/save.php';       // Save & Resume
 require_once BTDTF_DIR . 'includes/updater.php';
+require_once BTDTF_DIR . 'includes/admin.php';      // status + check-for-updates page
 
 /** Which snippets are still holding a module dormant (shown on the Plugins screen). */
 add_action('admin_notices', function () {
