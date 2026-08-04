@@ -20,7 +20,7 @@ function btdtf_update_manifest() {
         'timeout' => 10,
         'headers' => array(
             'Accept'     => 'application/vnd.github.raw',
-            'User-Agent' => 'BT-DTF-Updater',
+            'User-Agent' => 'BT-Transfers-Updater',
         ),
     ));
 
@@ -64,7 +64,7 @@ function btdtf_update_info($res, $action, $args) {
     $info = btdtf_update_manifest();
     if (empty($info)) return $res;
     $o = new stdClass();
-    $o->name          = 'BT DTF Studio';
+    $o->name          = 'BT Transfers';
     $o->slug          = 'bt-dtf';
     $o->version       = isset($info['version']) ? $info['version'] : BTDTF_VERSION;
     $o->author        = 'Duck and Rabbit Co.';

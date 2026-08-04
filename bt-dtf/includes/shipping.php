@@ -1,6 +1,6 @@
 <?php
 /**
- * BT DTF Studio — Shipping module (ported from the DTF Studio - Shipping snippet)
+ * BT Transfers — Shipping module (ported from the DTF Studio - Shipping snippet)
  *
  * Function and class names are btdtf_/BTDTF_ so they cannot collide with the
  * snippet. The shipping method ID stays 'btgsb_shipping' deliberately: that is

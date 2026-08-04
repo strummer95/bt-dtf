@@ -1,15 +1,15 @@
 <?php
 /*
-Plugin Name: BT DTF Studio
+Plugin Name: BT Transfers
 Plugin URI: https://boomerts.com
-Description: Boomer T's DTF gang sheet builder — settings and pricing tiers, sheet upload/AJAX, production files on the order screen and admin email, browser-side PDF generation, the Awaiting Items tracking flag, the DTF shipping method, and Save & Resume.
-Version: 0.3.0
+Description: Boomer T's DTF transfer + gang sheet builder — settings and pricing tiers, sheet upload/AJAX, production files on the order screen and admin email, browser-side PDF generation, the Awaiting Items tracking flag, the DTF shipping method, and Save & Resume.
+Version: 0.3.1
 Author: Duck and Rabbit Co.
 */
 
 if (!defined('ABSPATH')) exit;
 
-define('BTDTF_VERSION', '0.3.0');
+define('BTDTF_VERSION', '0.3.1');
 define('BTDTF_DIR',  plugin_dir_path(__FILE__));
 define('BTDTF_URL',  plugin_dir_url(__FILE__));
 define('BTDTF_FILE', __FILE__);
@@ -44,7 +44,7 @@ add_action('admin_notices', function () {
     if (function_exists('btgsb_ajax_save_sheet_email')) $waiting[] = 'DTF Studio - Save';
     if (!$waiting) return;
 
-    echo '<div class="notice notice-info"><p><strong>BT DTF Studio is installed and running alongside your snippets.</strong> '
+    echo '<div class="notice notice-info"><p><strong>BT Transfers is installed and running alongside your snippets.</strong> '
        . 'These modules are standing by because their snippet is still active: <strong>'
        . esc_html(implode(', ', $waiting)) . '</strong>. '
        . 'Nothing is broken — deactivate them in WPCode one at a time whenever you are ready, '

@@ -1,6 +1,6 @@
 <?php
 /**
- * BT DTF Studio — Save & Resume module (ported from the DTF Studio - Save snippet)
+ * BT Transfers — Save & Resume module (ported from the DTF Studio - Save snippet)
  *
  * Function names are btdtf_ so they cannot collide with the snippet. The AJAX
  * action names, the wp_btgsb_saves table, the btgsb_saves_db_v1 option, the

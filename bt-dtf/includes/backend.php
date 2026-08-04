@@ -113,7 +113,7 @@ function btdtf_settings_page() {
     $pid   = get_option(BTDTF_PROD);
     ?>
     <div class="wrap" style="max-width:800px">
-    <h1><span style="color:#27267e;font-weight:900">DTF Studio</span> — Sheet Builder Settings</h1>
+    <h1><span style="color:#27267e;font-weight:900">BT Transfers</span> — Sheet Builder Settings</h1>
     <?php if ($pid):
         $linked = wc_get_product($pid);
         $linked_name = $linked ? $linked->get_name() : 'Unknown';
@@ -753,7 +753,9 @@ function btdtf_boot() {
     if (btdtf_snippet_is_active()) {
         add_action('admin_notices', function () {
             if (!current_user_can('manage_options')) return;
-            echo '<div class="notice notice-warning"><p><strong>BT DTF Studio is dormant.</strong> '
+            $sc = function_exists('get_current_screen') ? get_current_screen() : null;
+            if (!$sc || $sc->id !== 'plugins') return;   // Plugins screen only
+            echo '<div class="notice notice-warning"><p><strong>BT Transfers is dormant.</strong> '
                . 'The old <em>DTF Studio &mdash; Backend</em> WPCode snippet is still active, so the plugin '
                . 'stood down rather than run everything twice. Nothing is broken &mdash; the snippet is doing '
                . 'the work. Deactivate it in WPCode whenever you are ready to switch over.</p></div>';
@@ -771,11 +773,11 @@ function btdtf_register_hooks() {
 
     add_action('admin_notices', function () {
         if (!class_exists('WooCommerce'))
-            echo '<div class="notice notice-error"><p><strong>DTF Studio</strong> requires WooCommerce to be active.</p></div>';
+            echo '<div class="notice notice-error"><p><strong>BT Transfers</strong> requires WooCommerce to be active.</p></div>';
     });
 
     add_action('admin_menu', function () {
-        add_menu_page('DTF Studio', 'DTF Studio', 'manage_options', 'btgsb-settings', 'btdtf_settings_page', 'dashicons-layout', 56);
+        add_menu_page('BT Transfers', 'BT Transfers', 'manage_options', 'btgsb-settings', 'btdtf_settings_page', 'dashicons-layout', 56);
     });
 
     add_action('wp_ajax_btgsb_save_sheet',        'btdtf_ajax_save_sheet');
