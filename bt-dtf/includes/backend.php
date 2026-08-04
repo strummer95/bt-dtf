@@ -5,10 +5,10 @@
  */
 
 defined('ABSPATH') || exit;
-defined('BTGSB_OPT')  || define('BTGSB_OPT',  'btgsb_settings');
-defined('BTGSB_PROD') || define('BTGSB_PROD', 'btgsb_product_id');
+defined('BTDTF_OPT')  || define('BTDTF_OPT',  'btgsb_settings');
+defined('BTDTF_PROD') || define('BTDTF_PROD', 'btgsb_product_id');
 
-function btgsb_defaults() {
+function btdtf_defaults() {
     return [
         'canvas_width'  => 22,
         'max_height'    => 300,
@@ -32,15 +32,11 @@ function btgsb_defaults() {
     ];
 }
 
-add_action('admin_init', function () {
-    if (!get_option(BTGSB_OPT)) update_option(BTGSB_OPT, btgsb_defaults());
-    btgsb_ensure_product();
-});
 
-function btgsb_ensure_product() {
+function btdtf_ensure_product() {
     if (!class_exists('WC_Product_Simple')) return;
 
-    $pid = get_option(BTGSB_PROD);
+    $pid = get_option(BTDTF_PROD);
 
     if ($pid && get_post($pid)) {
         $existing = wc_get_product($pid);
@@ -66,7 +62,7 @@ function btgsb_ensure_product() {
     foreach ($skus_to_check as $sku) {
         $found = wc_get_product_id_by_sku($sku);
         if ($found) {
-            update_option(BTGSB_PROD, $found);
+            update_option(BTDTF_PROD, $found);
             return;
         }
     }
@@ -79,19 +75,11 @@ function btgsb_ensure_product() {
     $p->set_regular_price(0);
     $p->set_virtual(false);
     $p->set_sold_individually(false);
-    update_option(BTGSB_PROD, $p->save());
+    update_option(BTDTF_PROD, $p->save());
 }
 
-add_action('admin_notices', function () {
-    if (!class_exists('WooCommerce'))
-        echo '<div class="notice notice-error"><p><strong>DTF Studio</strong> requires WooCommerce to be active.</p></div>';
-});
 
-add_action('admin_menu', function () {
-    add_menu_page('DTF Studio', 'DTF Studio', 'manage_options', 'btgsb-settings', 'btgsb_settings_page', 'dashicons-layout', 56);
-});
-
-function btgsb_settings_page() {
+function btdtf_settings_page() {
     if (isset($_POST['btgsb_save']) && check_admin_referer('btgsb_settings')) {
         $tiers = [];
         $maxes = (array)($_POST['tier_max']  ?? []);
@@ -116,13 +104,13 @@ function btgsb_settings_page() {
             'button_color'  => sanitize_hex_color($_POST['button_color']  ?? '#27267e'),
             'pricing_tiers' => $tiers,
         ];
-        update_option(BTGSB_OPT, $saved);
+        update_option(BTDTF_OPT, $saved);
         echo '<div class="updated"><p>Settings saved.</p></div>';
     }
 
-    $s = get_option(BTGSB_OPT, btgsb_defaults());
+    $s = get_option(BTDTF_OPT, btdtf_defaults());
     $tiers = $s['pricing_tiers'] ?? [];
-    $pid   = get_option(BTGSB_PROD);
+    $pid   = get_option(BTDTF_PROD);
     ?>
     <div class="wrap" style="max-width:800px">
     <h1><span style="color:#27267e;font-weight:900">DTF Studio</span> — Sheet Builder Settings</h1>
@@ -199,7 +187,7 @@ function btgsb_settings_page() {
 // wp_handle_upload re-encodes the file, the chunk can disappear. After save,
 // we verify and inject if missing so production files always carry the right
 // physical-size metadata.
-function btgsb_ensure_png_dpi($file_path, $dpi) {
+function btdtf_ensure_png_dpi($file_path, $dpi) {
     $data = @file_get_contents($file_path);
     if (!$data || strlen($data) < 33) return false;
     if (substr($data, 0, 8) !== "\x89PNG\r\n\x1a\n") return false;
@@ -238,7 +226,7 @@ function btgsb_ensure_png_dpi($file_path, $dpi) {
 // number) plus the per-design list with x{qty} copy counts. When the
 // combined full-sheet PNG/PDF was not generated (sheet too large to render
 // as one image), it shows an explanatory note instead of an error.
-function btgsb_production_files_html($order, $context) {
+function btdtf_production_files_html($order, $context) {
     if (!is_object($order) || !method_exists($order, 'get_items')) return '';
 
     $order_no = $order->get_order_number();
@@ -321,9 +309,7 @@ function btgsb_production_files_html($order, $context) {
     return $out;
 }
 
-add_action('wp_ajax_btgsb_save_sheet',        'btgsb_ajax_save_sheet');
-add_action('wp_ajax_nopriv_btgsb_save_sheet', 'btgsb_ajax_save_sheet');
-function btgsb_ajax_save_sheet() {
+function btdtf_ajax_save_sheet() {
     check_ajax_referer('btgsb_nonce', 'nonce');
 
     // -- New path: production ZIP (+ optional combined PNG) ----------
@@ -357,8 +343,8 @@ function btgsb_ajax_save_sheet() {
                         $saved_color_type = ($saved_data && substr($saved_data, 0, 8) === "\x89PNG\r\n\x1a\n")
                             ? ord($saved_data[25]) : 0;
                         if ($saved_color_type === 4 || $saved_color_type === 6) {
-                            $s = get_option(BTGSB_OPT, btgsb_defaults());
-                            btgsb_ensure_png_dpi($png_upload['file'], (int)$s['export_dpi']);
+                            $s = get_option(BTDTF_OPT, btdtf_defaults());
+                            btdtf_ensure_png_dpi($png_upload['file'], (int)$s['export_dpi']);
                             $result['sheet_url'] = $png_upload['url'];
                         } else {
                             // Alpha stripped by an optimizer - drop the PNG,
@@ -401,8 +387,8 @@ function btgsb_ajax_save_sheet() {
 
             // Belt-and-suspenders: ensure the DPI metadata is present even if a
             // plugin or wp_handle_upload stripped it during processing.
-            $s = get_option(BTGSB_OPT, btgsb_defaults());
-            btgsb_ensure_png_dpi($upload['file'], (int)$s['export_dpi']);
+            $s = get_option(BTDTF_OPT, btdtf_defaults());
+            btdtf_ensure_png_dpi($upload['file'], (int)$s['export_dpi']);
         }
 
         wp_send_json_success(['url'=>$upload['url']]);
@@ -416,20 +402,18 @@ function btgsb_ajax_save_sheet() {
         $fn = 'gang-sheet-' . time() . '-' . wp_generate_password(8, false) . '.png';
         $full = $ud['basedir'] . $sub . '/' . $fn;
         file_put_contents($full, $decoded);
-        $s = get_option(BTGSB_OPT, btgsb_defaults());
-        btgsb_ensure_png_dpi($full, (int)$s['export_dpi']);
+        $s = get_option(BTDTF_OPT, btdtf_defaults());
+        btdtf_ensure_png_dpi($full, (int)$s['export_dpi']);
         wp_send_json_success(['url' => $ud['baseurl'] . $sub . '/' . $fn]);
     } else {
         wp_send_json_error('No file received.');
     }
 }
 
-add_action('wp_ajax_btgsb_add_to_cart',        'btgsb_ajax_add_to_cart');
-add_action('wp_ajax_nopriv_btgsb_add_to_cart', 'btgsb_ajax_add_to_cart');
-function btgsb_ajax_add_to_cart() {
+function btdtf_ajax_add_to_cart() {
     check_ajax_referer('btgsb_nonce', 'nonce');
     if (!function_exists('WC')) wp_send_json_error('WooCommerce not active.');
-    $pid = (int)get_option(BTGSB_PROD, 0);
+    $pid = (int)get_option(BTDTF_PROD, 0);
     if (!$pid) wp_send_json_error('Gang sheet product missing — visit PS Studio settings to regenerate.');
     $sq_in     = floatval($_POST['sq_inches']     ?? 0);
     $price     = floatval($_POST['price']          ?? 0);
@@ -460,310 +444,47 @@ function btgsb_ajax_add_to_cart() {
 }
 
 /* ── Force jquery-blockui + shim — required by WooCommerce cart AJAX ─── */
-add_action('wp_enqueue_scripts', function () {
-    if (!is_cart() && !is_checkout()) return;
-    wp_enqueue_script('jquery-blockui');
-    $shim = '
-        if (window.jQuery && !jQuery.fn.block) {
-            jQuery.fn.block   = function() { return this; };
-            jQuery.fn.unblock = function() { return this; };
-            jQuery.blockUI    = function() {};
-            jQuery.unblockUI  = function() {};
-        }
-    ';
-    wp_add_inline_script('wc-cart',     $shim, 'before');
-    wp_add_inline_script('wc-checkout', $shim, 'before');
-}, 20);
 
 /* ── Cart button hard-submit fix ────────────────────────────────────── */
-add_action('wp_footer', function () {
-    if (!is_cart()) return;
-    ?>
-    <script>
-    (function trimShippingAddress() {
-        function doTrim() {
-            var dest = document.querySelector('.woocommerce-shipping-destination strong');
-            if (!dest) return;
-            var full = dest.textContent.trim();
-            var zip = full.match(/\b(\d{5}(?:-\d{4})?)\b/);
-            var state = full.match(/,\s*([A-Z]{2})\s+\d{5}/);
-            if (zip) {
-                dest.textContent = (state ? state[1] + ' ' : '') + zip[1];
-            }
-        }
-        doTrim();
-        document.body && document.body.addEventListener('updated_shipping_method', doTrim);
-        document.body && document.body.addEventListener('updated_cart_totals', doTrim);
-        var attempts = 0;
-        var poll = setInterval(function() {
-            doTrim(); if (++attempts > 10) clearInterval(poll);
-        }, 600);
-    })();
-
-    document.addEventListener('click', function(e) {
-        var updateBtn = e.target.closest('[name="update_cart"]');
-        if (updateBtn) {
-            e.stopImmediatePropagation();
-            updateBtn.disabled = false;
-            updateBtn.form.submit();
-            return;
-        }
-        var couponBtn = e.target.closest('.coupon [type="submit"], .coupon .button');
-        if (couponBtn) {
-            e.stopImmediatePropagation();
-            couponBtn.form.submit();
-            return;
-        }
-    }, true);
-
-    document.addEventListener('change', function(e) {
-        if (e.target.classList.contains('qty') || e.target.name && e.target.name.includes('[qty]')) {
-            var btn = document.querySelector('[name="update_cart"]');
-            if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); }
-        }
-    }, true);
-    </script>
-    <?php
-});
 
 /* ── Frontend cart CSS fixes ──────────────────────────────────────── */
-add_action('wp_head', function () {
-    if (!is_cart() && !is_checkout()) return;
-    echo '<style>
-    .woocommerce-shipping-calculator { margin-top:8px; }
-    .woocommerce-shipping-calculator .shipping-calculator-form { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
-    .woocommerce-shipping-calculator .shipping-calculator-form p { margin:0; flex:1; }
-    .woocommerce-shipping-calculator .shipping-calculator-form p:last-child { flex:0 0 auto; }
-    .woocommerce-shipping-calculator .shipping-calculator-form input { height:32px; padding:4px 8px; font-size:13px; border:1px solid #ccc; border-radius:4px; width:100%; box-sizing:border-box; }
-    .woocommerce-shipping-calculator .shipping-calculator-form .button { height:32px; padding:0 12px; font-size:13px; white-space:nowrap; }
-    .woocommerce-cart-form .quantity input.qty,
-    .woocommerce-cart-form td.product-quantity input,
-    .woocommerce td.product-quantity .qty {
-        min-width:64px!important;width:64px!important;height:38px!important;
-        font-size:16px!important;color:#333!important;text-align:center!important;
-        padding:4px 8px!important;box-sizing:border-box!important;
-        opacity:1!important;visibility:visible!important;display:inline-block!important;
-    }
-    .woocommerce-cart-form .actions .coupon .button,
-    .woocommerce-cart-form .actions button[name="update_cart"],
-    .woocommerce .cart .button {
-        opacity:1!important;cursor:pointer!important;pointer-events:auto!important;
-        transition:none!important;border-radius:4px!important;
-    }
-    .woocommerce-cart-form .actions .coupon .button:hover,
-    .woocommerce-cart-form .actions button[name="update_cart"]:hover {
-        opacity:.85!important;
-    }
-    .woocommerce-shipping-methods,
-    ul#shipping_method,
-    .woocommerce-shipping-methods li,
-    ul#shipping_method li {
-        display:block!important;
-        visibility:visible!important;
-        opacity:1!important;
-        list-style:none!important;
-        margin:4px 0!important;
-        padding:0!important;
-    }
-    .woocommerce-checkout .shipping_method,
-    .wc-block-components-radio-control__input[type=radio],
-    #shipping_method .shipping_method {
-        display:inline-block!important;
-        visibility:visible!important;
-        opacity:1!important;
-        pointer-events:auto!important;
-        position:static!important;
-        width:16px!important;
-        height:16px!important;
-        margin:0 6px 0 0!important;
-        cursor:pointer!important;
-        clip:auto!important;
-        clip-path:none!important;
-        overflow:visible!important;
-        appearance:auto!important;
-        -webkit-appearance:radio!important;
-    }
-    #shipping_method li { list-style:none!important; margin:6px 0!important; cursor:pointer!important; }
-    #shipping_method label { cursor:pointer!important; }
-    </style>';
-});
 
 /* ── Shipping calculator — postcode only ─────────────────────────── */
-add_filter('woocommerce_shipping_calculator_enable_city',     '__return_false');
-add_filter('woocommerce_shipping_calculator_enable_state',    '__return_false');
-add_filter('woocommerce_shipping_calculator_enable_postcode', '__return_true');
-add_filter('woocommerce_shipping_calculator_enable_country',  '__return_false');
 
-add_action('woocommerce_before_calculate_totals', function ($cart) {
-    if (is_admin() && !defined('DOING_AJAX')) return;
-    foreach ($cart->get_cart() as $item)
-        if (!empty($item['btgsb_price'])) $item['data']->set_price(floatval($item['btgsb_price']));
-});
 
 /* ── Cart display — what the customer sees in their cart ────────── */
 // Customer-safe metadata only: size, area, piece count. NO production URL.
-add_filter('woocommerce_get_item_data', function ($data, $item) {
-    if (!empty($item['btgsb_size']))       $data[] = ['name'=>'Sheet Size',   'value'=>esc_html($item['btgsb_size'])];
-    if (!empty($item['btgsb_sq_inches']))  $data[] = ['name'=>'Total Area',   'value'=>round($item['btgsb_sq_inches'],1).' sq in'];
-    if (!empty($item['btgsb_item_count'])) $data[] = ['name'=>'Total Pieces', 'value'=>intval($item['btgsb_item_count'])];
-    return $data;
-}, 10, 2);
 
 /* ── Order line items — store production URLs as HIDDEN meta ───── */
 // Underscore-prefixed keys are private/hidden from the customer-facing order
 // summary. Production file URLs go in here so customers never see them.
-add_action('woocommerce_checkout_create_order_line_item', function ($item, $ck, $values) {
-    // Public — customer can see
-    if (!empty($values['btgsb_size']))       $item->add_meta_data('Sheet Size',   $values['btgsb_size']);
-    if (!empty($values['btgsb_sq_inches']))  $item->add_meta_data('Total Area',   round($values['btgsb_sq_inches'],1).' sq in');
-    if (!empty($values['btgsb_item_count'])) $item->add_meta_data('Total Pieces', intval($values['btgsb_item_count']));
-    // Hidden — admin only (rendered below via woocommerce_after_order_itemmeta)
-    if (!empty($values['btgsb_sheet_url']))    $item->add_meta_data('_btgsb_sheet_url',    $values['btgsb_sheet_url']);
-    if (!empty($values['btgsb_design_files'])) $item->add_meta_data('_btgsb_design_files', $values['btgsb_design_files']);
-    if (!empty($values['btgsb_zip_url']))      $item->add_meta_data('_btgsb_zip_url',      $values['btgsb_zip_url']);
-    if (!empty($values['btgsb_manifest']))     $item->add_meta_data('_btgsb_manifest',     $values['btgsb_manifest']);
-    // combined flag: store '0' explicitly so we can tell "not rendered"
-    // apart from "old order with no flag at all".
-    $item->add_meta_data('_btgsb_combined', isset($values['btgsb_combined']) ? intval($values['btgsb_combined']) : 1);
-}, 10, 3);
 
 /* ── Backward-compat: hide legacy public meta from customers ──── */
 // Older orders (before this snippet update) stored "Sheet File" and
 // "Design Files" as PUBLIC meta. Filter them out for non-admins so customers
 // looking at their order history don't see production URLs.
-add_filter('woocommerce_order_item_get_formatted_meta_data', function ($meta_array, $item) {
-    if (current_user_can('manage_woocommerce')) return $meta_array;
-    foreach ($meta_array as $id => $meta) {
-        if (in_array($meta->key, ['Sheet File', 'Design Files'], true)) {
-            unset($meta_array[$id]);
-        }
-    }
-    return $meta_array;
-}, 10, 2);
 
 /* ── Admin order page — production files block ──────────────────── */
 // Shows the ZIP download link + the per-design list with x{qty} counts.
 // Rendered once per order, tied to the first line item.
-add_action('woocommerce_after_order_itemmeta', function ($item_id, $item, $product) {
-    if (!is_admin() || !current_user_can('manage_woocommerce')) return;
-    if (!is_object($item) || !method_exists($item, 'get_order_id')) return;
-    static $done = [];
-    $oid = $item->get_order_id();
-    if (!$oid || isset($done[$oid])) return;
-    $done[$oid] = true;
-    $order = wc_get_order($oid);
-    if (!$order) return;
-    echo btgsb_production_files_html($order, 'admin');
-}, 9, 3);
 
 /* ── Admin order page — render legacy production file links ───── */
-add_action('woocommerce_after_order_itemmeta', function ($item_id, $item, $product) {
-    if (!is_admin() || !current_user_can('manage_woocommerce')) return;
-    if (!is_object($item) || !method_exists($item, 'get_meta')) return;
-
-    // Read new hidden keys, fall back to legacy public keys for old orders
-    $sheet_url    = $item->get_meta('_btgsb_sheet_url');
-    if (!$sheet_url) $sheet_url = $item->get_meta('Sheet File');
-    $design_files = $item->get_meta('_btgsb_design_files');
-    if (!$design_files) $design_files = $item->get_meta('Design Files');
-
-    if (!$sheet_url && !$design_files) return;
-
-    // Resolve the WooCommerce order number for download filenames (e.g. 1042.png)
-    $order_no = '';
-    if (method_exists($item, 'get_order_id')) {
-        $oid = $item->get_order_id();
-        if ($oid) {
-            $ord = wc_get_order($oid);
-            if ($ord) $order_no = $ord->get_order_number();
-        }
-    }
-    $dl_base = $order_no !== '' ? preg_replace('/[^A-Za-z0-9_-]/', '', $order_no) : 'gang-sheet';
-
-    echo '<div class="btgsb-admin-files" style="margin-top:10px;padding:10px;background:#f0eff8;border:1px solid #d0cff0;border-radius:5px;font-size:13px">';
-    if ($sheet_url) {
-        $u = esc_url($sheet_url);
-        echo '<div style="margin-bottom:6px"><strong style="color:#27267e">Production Sheet</strong></div>';
-        echo '<a href="'.$u.'" target="_blank" download="'.esc_attr($dl_base).'.png" style="font-weight:bold;margin-right:14px;text-decoration:none">&#x1F4E5; Download PNG</a>';
-        echo '<button type="button" class="btgsb-pdf-dl" data-png="'.$u.'" data-fname="'.esc_attr($dl_base).'.pdf" style="font-weight:bold;color:#c0392b;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;font-size:13px;text-decoration:underline">&#x1F4C4; Download PDF</button>';
-    }
-    if ($design_files) {
-        echo '<div style="margin-top:8px"><strong style="color:#27267e">Original Design Files</strong><br>';
-        foreach (explode("\n", $design_files) as $line) {
-            $line = trim($line);
-            if (!$line) continue;
-            if (strpos($line, '|') !== false) {
-                [$fname, $furl] = explode('|', $line, 2);
-                echo '<a href="'.esc_url(trim($furl)).'" target="_blank" download style="display:block;margin:2px 0;color:#27267e">&#x1F4C5; '.esc_html(trim($fname)).'</a>';
-            } else if (filter_var($line, FILTER_VALIDATE_URL)) {
-                echo '<a href="'.esc_url($line).'" target="_blank" download style="display:block;margin:2px 0;color:#27267e">&#x1F4C5; Download</a>';
-            }
-        }
-        echo '</div>';
-    }
-    echo '</div>';
-}, 10, 3);
 
 /* ── Admin "New Order" email — production files block ──────────── */
 // Shows the ZIP download link + per-design list. Customer-facing emails
 // (order confirmation, processing, completed, etc.) stay clean.
-add_action('woocommerce_email_after_order_table', function ($order, $sent_to_admin, $plain_text, $email) {
-    if (!$sent_to_admin) return;
-    if (!isset($email->id) || $email->id !== 'new_order') return;
-    if ($plain_text) return;
-    echo btgsb_production_files_html($order, 'email');
-}, 9, 4);
 
 /* ── Admin "New Order" email — legacy combined PNG/PDF buttons ── */
 // Adds PNG + PDF download buttons after the order table for orders that
 // have a combined sheet PNG. ONLY in the admin new_order email.
-add_action('woocommerce_email_after_order_table', function ($order, $sent_to_admin, $plain_text, $email) {
-    if (!$sent_to_admin) return;
-    if (!isset($email->id) || $email->id !== 'new_order') return;
-    if ($plain_text) return;
-    if (!is_object($order) || !method_exists($order, 'get_items')) return;
-
-    $entries = [];
-    foreach ($order->get_items() as $item_id => $item) {
-        $sheet_url = $item->get_meta('_btgsb_sheet_url');
-        if (!$sheet_url) $sheet_url = $item->get_meta('Sheet File'); // legacy
-        if ($sheet_url) $entries[] = ['name' => $item->get_name(), 'url' => $sheet_url];
-    }
-    if (empty($entries)) return;
-
-    // Order number for download filenames (e.g. 1042.png)
-    $order_no = $order->get_order_number();
-    $dl_base  = $order_no !== '' ? preg_replace('/[^A-Za-z0-9_-]/', '', $order_no) : 'gang-sheet';
-
-    echo '<h2 style="color:#27267e;margin:24px 0 12px;font-size:18px;border-bottom:2px solid #27267e;padding-bottom:6px">&#x1F4E6; Combined Sheet</h2>';
-    foreach ($entries as $e) {
-        $png = esc_url($e['url']);
-        $pdf = esc_url(add_query_arg(['page' => 'btgsb-pdf-download', 'sheet' => $e['url'], 'order' => $dl_base], admin_url('admin.php')));
-        echo '<div style="background:#f0eff8;border:1px solid #d0cff0;border-radius:6px;padding:16px;margin-bottom:12px;font-family:Arial,sans-serif">';
-        echo '<p style="margin:0 0 10px;font-weight:bold;color:#333">' . esc_html($e['name']) . '</p>';
-        echo '<a href="' . $png . '" download="' . esc_attr($dl_base) . '.png" style="display:inline-block;margin:4px 8px 4px 0;background:#27267e;color:#fff;padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4E5; Download PNG</a>';
-        echo '<a href="' . $pdf . '" style="display:inline-block;margin:4px 0;background:#c0392b;color:#fff;padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4C4; Download PDF</a>';
-        echo '</div>';
-    }
-}, 10, 4);
 
 /* ── Hidden admin page — generates PDF in the browser via jsPDF ── */
 // The "Download PDF" button in the admin email points here. Page is admin-only
 // (auth via WP login + manage_woocommerce capability), loads jsPDF, fetches
 // the PNG, wraps it into a one-page 22"-wide PDF, triggers download. No
 // server-side PDF library / Imagick / Ghostscript required.
-add_action('admin_menu', function () {
-    add_submenu_page(
-        null,                       // parent_slug = null → page exists but doesn't show in any menu
-        'Generate Gang Sheet PDF',
-        'Generate Gang Sheet PDF',
-        'manage_woocommerce',
-        'btgsb-pdf-download',
-        'btgsb_render_pdf_download_page'
-    );
-});
 
-function btgsb_render_pdf_download_page() {
+function btdtf_render_pdf_download_page() {
     if (!current_user_can('manage_woocommerce')) wp_die('Unauthorized');
     $sheet_url = isset($_GET['sheet']) ? esc_url_raw(wp_unslash($_GET['sheet'])) : '';
     $order_no  = isset($_GET['order']) ? preg_replace('/[^A-Za-z0-9_-]/', '', wp_unslash($_GET['order'])) : '';
@@ -838,80 +559,6 @@ function btgsb_render_pdf_download_page() {
 }
 
 /* ── Admin order edit page — client-side PDF generation via jsPDF ───── */
-add_action('admin_footer', function () {
-    $screen = function_exists('get_current_screen') ? get_current_screen() : null;
-    if (!$screen) return;
-    // Show on classic shop_order edit screen AND HPOS order screen
-    $on_order_page = ($screen->post_type === 'shop_order')
-                  || ($screen->id === 'woocommerce_page_wc-orders')
-                  || (isset($_GET['page']) && $_GET['page'] === 'wc-orders');
-    if (!$on_order_page) return;
-    ?>
-    <script>
-    (function(){
-        if (window.btgsbPdfDlBound) return; window.btgsbPdfDlBound = true;
-        var jsPDFLoad = null;
-        function loadJsPDF() {
-            if (jsPDFLoad) return jsPDFLoad;
-            jsPDFLoad = new Promise(function(resolve, reject){
-                if (window.jspdf && window.jspdf.jsPDF) { resolve(window.jspdf); return; }
-                var s = document.createElement('script');
-                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-                s.onload  = function(){ window.jspdf ? resolve(window.jspdf) : reject(new Error('jsPDF loaded but namespace missing')); };
-                s.onerror = function(){ reject(new Error('Could not load jsPDF from CDN')); };
-                document.head.appendChild(s);
-            });
-            return jsPDFLoad;
-        }
-        document.addEventListener('click', function(e){
-            var btn = e.target.closest('.btgsb-pdf-dl');
-            if (!btn) return;
-            e.preventDefault();
-            var pngUrl = btn.getAttribute('data-png');
-            var fname  = btn.getAttribute('data-fname') || '';
-            if (!pngUrl) return;
-            var orig = btn.innerHTML;
-            btn.innerHTML = '\u23F3 Building PDF\u2026';
-            btn.disabled = true;
-            loadJsPDF().then(function(ns){
-                var img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.onload = function(){
-                    try {
-                        // Sheet is 22" wide by convention; height derived from aspect.
-                        var inW = 22;
-                        var inH = (img.naturalHeight / img.naturalWidth) * inW;
-                        var pdf = new ns.jsPDF({
-                            orientation: inH > inW ? 'portrait' : 'landscape',
-                            unit: 'in',
-                            format: [inW, inH],
-                            compress: true
-                        });
-                        pdf.addImage(img, 'PNG', 0, 0, inW, inH, undefined, 'FAST');
-                        var name = fname || (pngUrl.split('/').pop() || 'gang-sheet.png').replace(/\.png(\?.*)?$/i, '.pdf');
-                        pdf.save(name);
-                        btn.innerHTML = '\u2713 Downloaded';
-                        setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; }, 1800);
-                    } catch (err) {
-                        alert('Could not generate PDF: ' + err.message);
-                        btn.innerHTML = orig; btn.disabled = false;
-                    }
-                };
-                img.onerror = function(){
-                    alert('Could not load PNG for PDF conversion. Check that the file still exists on the server.');
-                    btn.innerHTML = orig; btn.disabled = false;
-                };
-                img.src = pngUrl;
-            }).catch(function(err){
-                alert(err.message);
-                btn.innerHTML = orig; btn.disabled = false;
-            });
-        });
-    })();
-    </script>
-    <?php
-});
-
 
 
 /* ══ AWAITING ITEMS — in-house tracking flag ════════════════════════════
@@ -925,28 +572,28 @@ add_action('admin_footer', function () {
    Bulk actions and a filter link at the top are wired up too.
    ═══════════════════════════════════════════════════════════════════════ */
 
-define('BTGSB_AWAIT_META', '_btgsb_awaiting');
+define('BTDTF_AWAIT_META', '_btgsb_awaiting');
 
-function btgsb_await_is($order_id) {
+function btdtf_await_is($order_id) {
     $o = wc_get_order($order_id);
-    return $o ? ($o->get_meta(BTGSB_AWAIT_META) === 'yes') : false;
+    return $o ? ($o->get_meta(BTDTF_AWAIT_META) === 'yes') : false;
 }
 
-function btgsb_await_set($order_id, $on) {
+function btdtf_await_set($order_id, $on) {
     $o = wc_get_order($order_id);
     if (!$o) return;
     if ($on) {
-        $o->update_meta_data(BTGSB_AWAIT_META, 'yes');
+        $o->update_meta_data(BTDTF_AWAIT_META, 'yes');
         $o->add_order_note('Flagged: Awaiting Items.');
     } else {
-        $o->delete_meta_data(BTGSB_AWAIT_META);
+        $o->delete_meta_data(BTDTF_AWAIT_META);
         $o->add_order_note('Cleared: Awaiting Items.');
     }
     $o->save();   // status untouched — no customer email
 }
 
-function btgsb_await_badge($order_id) {
-    $on  = btgsb_await_is($order_id);
+function btdtf_await_badge($order_id) {
+    $on  = btdtf_await_is($order_id);
     $url = wp_nonce_url(
         add_query_arg(['btgsb_await_toggle' => $order_id], admin_url('admin.php?page=wc-orders')),
         'btgsb_await_toggle'
@@ -958,84 +605,40 @@ function btgsb_await_badge($order_id) {
 }
 
 /* ── Toggle handler ─────────────────────────────────────────────────── */
-add_action('admin_init', function () {
-    if (empty($_GET['btgsb_await_toggle'])) return;
-    if (!current_user_can('manage_woocommerce')) return;
-    if (!wp_verify_nonce($_GET['_wpnonce'] ?? '', 'btgsb_await_toggle')) return;
-    $id = intval($_GET['btgsb_await_toggle']);
-    btgsb_await_set($id, !btgsb_await_is($id));
-    wp_safe_redirect(remove_query_arg(['btgsb_await_toggle', '_wpnonce'], wp_get_referer() ?: admin_url('admin.php?page=wc-orders')));
-    exit;
-});
 
 /* ── Column: HPOS ───────────────────────────────────────────────────── */
-add_filter('woocommerce_shop_order_list_table_columns', function ($cols) {
-    $new = [];
-    foreach ($cols as $k => $v) {
-        $new[$k] = $v;
-        if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
-    }
-    if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
-    return $new;
-});
-add_action('woocommerce_shop_order_list_table_custom_column', function ($col, $order) {
-    if ($col === 'btgsb_await') echo btgsb_await_badge($order->get_id());
-}, 10, 2);
 
 /* ── Column: classic orders screen ──────────────────────────────────── */
-add_filter('manage_edit-shop_order_columns', function ($cols) {
-    $new = [];
-    foreach ($cols as $k => $v) {
-        $new[$k] = $v;
-        if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
-    }
-    if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
-    return $new;
-});
-add_action('manage_shop_order_posts_custom_column', function ($col, $post_id) {
-    if ($col === 'btgsb_await') echo btgsb_await_badge($post_id);
-}, 10, 2);
 
 /* ── Bulk actions ───────────────────────────────────────────────────── */
-add_filter('bulk_actions-woocommerce_page_wc-orders', 'btgsb_await_bulk_actions');
-add_filter('bulk_actions-edit-shop_order',            'btgsb_await_bulk_actions');
-function btgsb_await_bulk_actions($actions) {
+function btdtf_await_bulk_actions($actions) {
     $actions['btgsb_await_on']  = 'Mark Awaiting Items';
     $actions['btgsb_await_off'] = 'Clear Awaiting Items';
     return $actions;
 }
 
-add_filter('handle_bulk_actions-woocommerce_page_wc-orders', 'btgsb_await_bulk_handle', 10, 3);
-add_filter('handle_bulk_actions-edit-shop_order',            'btgsb_await_bulk_handle', 10, 3);
-function btgsb_await_bulk_handle($redirect, $action, $ids) {
+function btdtf_await_bulk_handle($redirect, $action, $ids) {
     if ($action !== 'btgsb_await_on' && $action !== 'btgsb_await_off') return $redirect;
     $on = ($action === 'btgsb_await_on');
-    foreach ((array) $ids as $id) btgsb_await_set(intval($id), $on);
+    foreach ((array) $ids as $id) btdtf_await_set(intval($id), $on);
     return add_query_arg('btgsb_await_bulk', count((array) $ids), $redirect);
 }
 
-add_action('admin_notices', function () {
-    if (isset($_GET['btgsb_await_bulk']))
-        echo '<div class="notice notice-success is-dismissible"><p>'
-           . intval($_GET['btgsb_await_bulk']) . ' order(s) updated.</p></div>';
-});
 
 /* ── Filter link at the top of the Orders list ──────────────────────── */
-function btgsb_await_count() {
+function btdtf_await_count() {
     global $wpdb;
     $hpos = $wpdb->prefix . 'wc_orders_meta';
     if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $hpos)) === $hpos) {
         return (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $hpos WHERE meta_key=%s AND meta_value='yes'", BTGSB_AWAIT_META));
+            "SELECT COUNT(*) FROM $hpos WHERE meta_key=%s AND meta_value='yes'", BTDTF_AWAIT_META));
     }
     return (int) $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key=%s AND meta_value='yes'", BTGSB_AWAIT_META));
+        "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE meta_key=%s AND meta_value='yes'", BTDTF_AWAIT_META));
 }
 
-add_filter('views_woocommerce_page_wc-orders', 'btgsb_await_view_link');
-add_filter('views_edit-shop_order',            'btgsb_await_view_link');
-function btgsb_await_view_link($views) {
-    $n = btgsb_await_count();
+function btdtf_await_view_link($views) {
+    $n = btdtf_await_count();
     if (!$n) return $views;
     $active = !empty($_GET['btgsb_awaiting']);
     $url    = add_query_arg('btgsb_awaiting', 1, admin_url('admin.php?page=wc-orders'));
@@ -1045,19 +648,7 @@ function btgsb_await_view_link($views) {
 }
 
 // Apply the filter — HPOS
-add_filter('woocommerce_order_list_table_prepare_items_query_args', function ($args) {
-    if (empty($_GET['btgsb_awaiting'])) return $args;
-    $args['meta_query'][] = ['key' => BTGSB_AWAIT_META, 'value' => 'yes'];
-    return $args;
-});
 // Apply the filter — classic
-add_filter('request', function ($vars) {
-    if (empty($_GET['btgsb_awaiting'])) return $vars;
-    if (($vars['post_type'] ?? '') !== 'shop_order') return $vars;
-    $vars['meta_key']   = BTGSB_AWAIT_META;
-    $vars['meta_value'] = 'yes';
-    return $vars;
-});
 
 /* ── Branded HTML email shell ─────────────────────────────────────────
    NOTE: the four custom WooCommerce order statuses (Art Approved, Printing,
@@ -1066,7 +657,7 @@ add_filter('request', function ($vars) {
    The two helpers below are deliberately KEPT: they are declared here and may
    be called by the DTF Studio Save & Resume snippet. Removing them would
    fatal that snippet. ─────────────────────────────────────────────────── */
-function btgsb_branded_email_html($title, $eyebrow, $intro_html, $body_html) {
+function btdtf_branded_email_html($title, $eyebrow, $intro_html, $body_html) {
     $logo_url = 'https://boomerts.com/wp-content/uploads/2024/01/BT-Logo-250px.png';
     return '<!DOCTYPE html>
 <html lang="en">
@@ -1119,7 +710,7 @@ function btgsb_branded_email_html($title, $eyebrow, $intro_html, $body_html) {
 }
 
 /* ── Email sender ───────────────────────────────────────────────────── */
-function btgsb_send_customer_email($to, $subject, $html) {
+function btdtf_send_customer_email($to, $subject, $html) {
     $site_name  = get_bloginfo('name');
     $from_name  = get_option('woocommerce_email_from_name', $site_name);
     $from_email = 'orders@boomerts.com';
@@ -1129,4 +720,492 @@ function btgsb_send_customer_email($to, $subject, $html) {
         'Reply-To: ' . $from_email,
     ];
     return wp_mail($to, $subject, $html, $headers);
+}
+
+
+/* ══ BOOT ═══════════════════════════════════════════════════════════════
+   Nothing registers at file load. Everything waits for plugins_loaded at
+   priority 999, by which point WPCode has already evaluated its snippets —
+   so the function_exists() test below is reliable rather than a guess.
+
+   If the old DTF Studio snippet is still active, the plugin stays fully
+   dormant: no menu, no AJAX handlers, no order columns, no duplicate line
+   item meta. The site keeps running on the snippet exactly as before.
+
+   This is a tidiness guard, NOT a crash guard. Every function here is
+   prefixed btdtf_ and every constant BTDTF_, sharing no name at all with
+   the snippet's btgsb_* set, so a fatal redeclare is impossible either way
+   regardless of activation order.
+
+   Deliberately NOT renamed: option names, order meta keys, AJAX actions,
+   the nonce, admin page slugs and CSS classes all stay btgsb_*, so existing
+   orders, saved settings and the DTF Studio Frontend snippet keep working
+   untouched.
+   ═══════════════════════════════════════════════════════════════════════ */
+function btdtf_snippet_is_active() {
+    return function_exists('btgsb_defaults')
+        || function_exists('btgsb_ajax_save_sheet')
+        || function_exists('btgsb_settings_page');
+}
+
+add_action('plugins_loaded', 'btdtf_boot', 999);
+function btdtf_boot() {
+    if (btdtf_snippet_is_active()) {
+        add_action('admin_notices', function () {
+            if (!current_user_can('manage_options')) return;
+            echo '<div class="notice notice-warning"><p><strong>BT DTF Studio is dormant.</strong> '
+               . 'The old <em>DTF Studio &mdash; Backend</em> WPCode snippet is still active, so the plugin '
+               . 'stood down rather than run everything twice. Nothing is broken &mdash; the snippet is doing '
+               . 'the work. Deactivate it in WPCode whenever you are ready to switch over.</p></div>';
+        });
+        return;
+    }
+    btdtf_register_hooks();
+}
+
+function btdtf_register_hooks() {
+    add_action('admin_init', function () {
+        if (!get_option(BTDTF_OPT)) update_option(BTDTF_OPT, btdtf_defaults());
+        btdtf_ensure_product();
+    });
+
+    add_action('admin_notices', function () {
+        if (!class_exists('WooCommerce'))
+            echo '<div class="notice notice-error"><p><strong>DTF Studio</strong> requires WooCommerce to be active.</p></div>';
+    });
+
+    add_action('admin_menu', function () {
+        add_menu_page('DTF Studio', 'DTF Studio', 'manage_options', 'btgsb-settings', 'btdtf_settings_page', 'dashicons-layout', 56);
+    });
+
+    add_action('wp_ajax_btgsb_save_sheet',        'btdtf_ajax_save_sheet');
+
+    add_action('wp_ajax_nopriv_btgsb_save_sheet', 'btdtf_ajax_save_sheet');
+
+    add_action('wp_ajax_btgsb_add_to_cart',        'btdtf_ajax_add_to_cart');
+
+    add_action('wp_ajax_nopriv_btgsb_add_to_cart', 'btdtf_ajax_add_to_cart');
+
+    add_action('wp_enqueue_scripts', function () {
+        if (!is_cart() && !is_checkout()) return;
+        wp_enqueue_script('jquery-blockui');
+        $shim = '
+            if (window.jQuery && !jQuery.fn.block) {
+                jQuery.fn.block   = function() { return this; };
+                jQuery.fn.unblock = function() { return this; };
+                jQuery.blockUI    = function() {};
+                jQuery.unblockUI  = function() {};
+            }
+        ';
+        wp_add_inline_script('wc-cart',     $shim, 'before');
+        wp_add_inline_script('wc-checkout', $shim, 'before');
+    }, 20);
+
+    add_action('wp_footer', function () {
+        if (!is_cart()) return;
+        ?>
+        <script>
+        (function trimShippingAddress() {
+            function doTrim() {
+                var dest = document.querySelector('.woocommerce-shipping-destination strong');
+                if (!dest) return;
+                var full = dest.textContent.trim();
+                var zip = full.match(/\b(\d{5}(?:-\d{4})?)\b/);
+                var state = full.match(/,\s*([A-Z]{2})\s+\d{5}/);
+                if (zip) {
+                    dest.textContent = (state ? state[1] + ' ' : '') + zip[1];
+                }
+            }
+            doTrim();
+            document.body && document.body.addEventListener('updated_shipping_method', doTrim);
+            document.body && document.body.addEventListener('updated_cart_totals', doTrim);
+            var attempts = 0;
+            var poll = setInterval(function() {
+                doTrim(); if (++attempts > 10) clearInterval(poll);
+            }, 600);
+        })();
+    
+        document.addEventListener('click', function(e) {
+            var updateBtn = e.target.closest('[name="update_cart"]');
+            if (updateBtn) {
+                e.stopImmediatePropagation();
+                updateBtn.disabled = false;
+                updateBtn.form.submit();
+                return;
+            }
+            var couponBtn = e.target.closest('.coupon [type="submit"], .coupon .button');
+            if (couponBtn) {
+                e.stopImmediatePropagation();
+                couponBtn.form.submit();
+                return;
+            }
+        }, true);
+    
+        document.addEventListener('change', function(e) {
+            if (e.target.classList.contains('qty') || e.target.name && e.target.name.includes('[qty]')) {
+                var btn = document.querySelector('[name="update_cart"]');
+                if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); }
+            }
+        }, true);
+        </script>
+        <?php
+    });
+
+    add_action('wp_head', function () {
+        if (!is_cart() && !is_checkout()) return;
+        echo '<style>
+        .woocommerce-shipping-calculator { margin-top:8px; }
+        .woocommerce-shipping-calculator .shipping-calculator-form { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
+        .woocommerce-shipping-calculator .shipping-calculator-form p { margin:0; flex:1; }
+        .woocommerce-shipping-calculator .shipping-calculator-form p:last-child { flex:0 0 auto; }
+        .woocommerce-shipping-calculator .shipping-calculator-form input { height:32px; padding:4px 8px; font-size:13px; border:1px solid #ccc; border-radius:4px; width:100%; box-sizing:border-box; }
+        .woocommerce-shipping-calculator .shipping-calculator-form .button { height:32px; padding:0 12px; font-size:13px; white-space:nowrap; }
+        .woocommerce-cart-form .quantity input.qty,
+        .woocommerce-cart-form td.product-quantity input,
+        .woocommerce td.product-quantity .qty {
+            min-width:64px!important;width:64px!important;height:38px!important;
+            font-size:16px!important;color:#333!important;text-align:center!important;
+            padding:4px 8px!important;box-sizing:border-box!important;
+            opacity:1!important;visibility:visible!important;display:inline-block!important;
+        }
+        .woocommerce-cart-form .actions .coupon .button,
+        .woocommerce-cart-form .actions button[name="update_cart"],
+        .woocommerce .cart .button {
+            opacity:1!important;cursor:pointer!important;pointer-events:auto!important;
+            transition:none!important;border-radius:4px!important;
+        }
+        .woocommerce-cart-form .actions .coupon .button:hover,
+        .woocommerce-cart-form .actions button[name="update_cart"]:hover {
+            opacity:.85!important;
+        }
+        .woocommerce-shipping-methods,
+        ul#shipping_method,
+        .woocommerce-shipping-methods li,
+        ul#shipping_method li {
+            display:block!important;
+            visibility:visible!important;
+            opacity:1!important;
+            list-style:none!important;
+            margin:4px 0!important;
+            padding:0!important;
+        }
+        .woocommerce-checkout .shipping_method,
+        .wc-block-components-radio-control__input[type=radio],
+        #shipping_method .shipping_method {
+            display:inline-block!important;
+            visibility:visible!important;
+            opacity:1!important;
+            pointer-events:auto!important;
+            position:static!important;
+            width:16px!important;
+            height:16px!important;
+            margin:0 6px 0 0!important;
+            cursor:pointer!important;
+            clip:auto!important;
+            clip-path:none!important;
+            overflow:visible!important;
+            appearance:auto!important;
+            -webkit-appearance:radio!important;
+        }
+        #shipping_method li { list-style:none!important; margin:6px 0!important; cursor:pointer!important; }
+        #shipping_method label { cursor:pointer!important; }
+        </style>';
+    });
+
+    add_filter('woocommerce_shipping_calculator_enable_city',     '__return_false');
+
+    add_filter('woocommerce_shipping_calculator_enable_state',    '__return_false');
+
+    add_filter('woocommerce_shipping_calculator_enable_postcode', '__return_true');
+
+    add_filter('woocommerce_shipping_calculator_enable_country',  '__return_false');
+
+    add_action('woocommerce_before_calculate_totals', function ($cart) {
+        if (is_admin() && !defined('DOING_AJAX')) return;
+        foreach ($cart->get_cart() as $item)
+            if (!empty($item['btgsb_price'])) $item['data']->set_price(floatval($item['btgsb_price']));
+    });
+
+    add_filter('woocommerce_get_item_data', function ($data, $item) {
+        if (!empty($item['btgsb_size']))       $data[] = ['name'=>'Sheet Size',   'value'=>esc_html($item['btgsb_size'])];
+        if (!empty($item['btgsb_sq_inches']))  $data[] = ['name'=>'Total Area',   'value'=>round($item['btgsb_sq_inches'],1).' sq in'];
+        if (!empty($item['btgsb_item_count'])) $data[] = ['name'=>'Total Pieces', 'value'=>intval($item['btgsb_item_count'])];
+        return $data;
+    }, 10, 2);
+
+    add_action('woocommerce_checkout_create_order_line_item', function ($item, $ck, $values) {
+        // Public — customer can see
+        if (!empty($values['btgsb_size']))       $item->add_meta_data('Sheet Size',   $values['btgsb_size']);
+        if (!empty($values['btgsb_sq_inches']))  $item->add_meta_data('Total Area',   round($values['btgsb_sq_inches'],1).' sq in');
+        if (!empty($values['btgsb_item_count'])) $item->add_meta_data('Total Pieces', intval($values['btgsb_item_count']));
+        // Hidden — admin only (rendered below via woocommerce_after_order_itemmeta)
+        if (!empty($values['btgsb_sheet_url']))    $item->add_meta_data('_btgsb_sheet_url',    $values['btgsb_sheet_url']);
+        if (!empty($values['btgsb_design_files'])) $item->add_meta_data('_btgsb_design_files', $values['btgsb_design_files']);
+        if (!empty($values['btgsb_zip_url']))      $item->add_meta_data('_btgsb_zip_url',      $values['btgsb_zip_url']);
+        if (!empty($values['btgsb_manifest']))     $item->add_meta_data('_btgsb_manifest',     $values['btgsb_manifest']);
+        // combined flag: store '0' explicitly so we can tell "not rendered"
+        // apart from "old order with no flag at all".
+        $item->add_meta_data('_btgsb_combined', isset($values['btgsb_combined']) ? intval($values['btgsb_combined']) : 1);
+    }, 10, 3);
+
+    add_filter('woocommerce_order_item_get_formatted_meta_data', function ($meta_array, $item) {
+        if (current_user_can('manage_woocommerce')) return $meta_array;
+        foreach ($meta_array as $id => $meta) {
+            if (in_array($meta->key, ['Sheet File', 'Design Files'], true)) {
+                unset($meta_array[$id]);
+            }
+        }
+        return $meta_array;
+    }, 10, 2);
+
+    add_action('woocommerce_after_order_itemmeta', function ($item_id, $item, $product) {
+        if (!is_admin() || !current_user_can('manage_woocommerce')) return;
+        if (!is_object($item) || !method_exists($item, 'get_order_id')) return;
+        static $done = [];
+        $oid = $item->get_order_id();
+        if (!$oid || isset($done[$oid])) return;
+        $done[$oid] = true;
+        $order = wc_get_order($oid);
+        if (!$order) return;
+        echo btdtf_production_files_html($order, 'admin');
+    }, 9, 3);
+
+    add_action('woocommerce_after_order_itemmeta', function ($item_id, $item, $product) {
+        if (!is_admin() || !current_user_can('manage_woocommerce')) return;
+        if (!is_object($item) || !method_exists($item, 'get_meta')) return;
+    
+        // Read new hidden keys, fall back to legacy public keys for old orders
+        $sheet_url    = $item->get_meta('_btgsb_sheet_url');
+        if (!$sheet_url) $sheet_url = $item->get_meta('Sheet File');
+        $design_files = $item->get_meta('_btgsb_design_files');
+        if (!$design_files) $design_files = $item->get_meta('Design Files');
+    
+        if (!$sheet_url && !$design_files) return;
+    
+        // Resolve the WooCommerce order number for download filenames (e.g. 1042.png)
+        $order_no = '';
+        if (method_exists($item, 'get_order_id')) {
+            $oid = $item->get_order_id();
+            if ($oid) {
+                $ord = wc_get_order($oid);
+                if ($ord) $order_no = $ord->get_order_number();
+            }
+        }
+        $dl_base = $order_no !== '' ? preg_replace('/[^A-Za-z0-9_-]/', '', $order_no) : 'gang-sheet';
+    
+        echo '<div class="btgsb-admin-files" style="margin-top:10px;padding:10px;background:#f0eff8;border:1px solid #d0cff0;border-radius:5px;font-size:13px">';
+        if ($sheet_url) {
+            $u = esc_url($sheet_url);
+            echo '<div style="margin-bottom:6px"><strong style="color:#27267e">Production Sheet</strong></div>';
+            echo '<a href="'.$u.'" target="_blank" download="'.esc_attr($dl_base).'.png" style="font-weight:bold;margin-right:14px;text-decoration:none">&#x1F4E5; Download PNG</a>';
+            echo '<button type="button" class="btgsb-pdf-dl" data-png="'.$u.'" data-fname="'.esc_attr($dl_base).'.pdf" style="font-weight:bold;color:#c0392b;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;font-size:13px;text-decoration:underline">&#x1F4C4; Download PDF</button>';
+        }
+        if ($design_files) {
+            echo '<div style="margin-top:8px"><strong style="color:#27267e">Original Design Files</strong><br>';
+            foreach (explode("\n", $design_files) as $line) {
+                $line = trim($line);
+                if (!$line) continue;
+                if (strpos($line, '|') !== false) {
+                    [$fname, $furl] = explode('|', $line, 2);
+                    echo '<a href="'.esc_url(trim($furl)).'" target="_blank" download style="display:block;margin:2px 0;color:#27267e">&#x1F4C5; '.esc_html(trim($fname)).'</a>';
+                } else if (filter_var($line, FILTER_VALIDATE_URL)) {
+                    echo '<a href="'.esc_url($line).'" target="_blank" download style="display:block;margin:2px 0;color:#27267e">&#x1F4C5; Download</a>';
+                }
+            }
+            echo '</div>';
+        }
+        echo '</div>';
+    }, 10, 3);
+
+    add_action('woocommerce_email_after_order_table', function ($order, $sent_to_admin, $plain_text, $email) {
+        if (!$sent_to_admin) return;
+        if (!isset($email->id) || $email->id !== 'new_order') return;
+        if ($plain_text) return;
+        echo btdtf_production_files_html($order, 'email');
+    }, 9, 4);
+
+    add_action('woocommerce_email_after_order_table', function ($order, $sent_to_admin, $plain_text, $email) {
+        if (!$sent_to_admin) return;
+        if (!isset($email->id) || $email->id !== 'new_order') return;
+        if ($plain_text) return;
+        if (!is_object($order) || !method_exists($order, 'get_items')) return;
+    
+        $entries = [];
+        foreach ($order->get_items() as $item_id => $item) {
+            $sheet_url = $item->get_meta('_btgsb_sheet_url');
+            if (!$sheet_url) $sheet_url = $item->get_meta('Sheet File'); // legacy
+            if ($sheet_url) $entries[] = ['name' => $item->get_name(), 'url' => $sheet_url];
+        }
+        if (empty($entries)) return;
+    
+        // Order number for download filenames (e.g. 1042.png)
+        $order_no = $order->get_order_number();
+        $dl_base  = $order_no !== '' ? preg_replace('/[^A-Za-z0-9_-]/', '', $order_no) : 'gang-sheet';
+    
+        echo '<h2 style="color:#27267e;margin:24px 0 12px;font-size:18px;border-bottom:2px solid #27267e;padding-bottom:6px">&#x1F4E6; Combined Sheet</h2>';
+        foreach ($entries as $e) {
+            $png = esc_url($e['url']);
+            $pdf = esc_url(add_query_arg(['page' => 'btgsb-pdf-download', 'sheet' => $e['url'], 'order' => $dl_base], admin_url('admin.php')));
+            echo '<div style="background:#f0eff8;border:1px solid #d0cff0;border-radius:6px;padding:16px;margin-bottom:12px;font-family:Arial,sans-serif">';
+            echo '<p style="margin:0 0 10px;font-weight:bold;color:#333">' . esc_html($e['name']) . '</p>';
+            echo '<a href="' . $png . '" download="' . esc_attr($dl_base) . '.png" style="display:inline-block;margin:4px 8px 4px 0;background:#27267e;color:#fff;padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4E5; Download PNG</a>';
+            echo '<a href="' . $pdf . '" style="display:inline-block;margin:4px 0;background:#c0392b;color:#fff;padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4C4; Download PDF</a>';
+            echo '</div>';
+        }
+    }, 10, 4);
+
+    add_action('admin_menu', function () {
+        add_submenu_page(
+            null,                       // parent_slug = null → page exists but doesn't show in any menu
+            'Generate Gang Sheet PDF',
+            'Generate Gang Sheet PDF',
+            'manage_woocommerce',
+            'btgsb-pdf-download',
+            'btdtf_render_pdf_download_page'
+        );
+    });
+
+    add_action('admin_footer', function () {
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if (!$screen) return;
+        // Show on classic shop_order edit screen AND HPOS order screen
+        $on_order_page = ($screen->post_type === 'shop_order')
+                      || ($screen->id === 'woocommerce_page_wc-orders')
+                      || (isset($_GET['page']) && $_GET['page'] === 'wc-orders');
+        if (!$on_order_page) return;
+        ?>
+        <script>
+        (function(){
+            if (window.btgsbPdfDlBound) return; window.btgsbPdfDlBound = true;
+            var jsPDFLoad = null;
+            function loadJsPDF() {
+                if (jsPDFLoad) return jsPDFLoad;
+                jsPDFLoad = new Promise(function(resolve, reject){
+                    if (window.jspdf && window.jspdf.jsPDF) { resolve(window.jspdf); return; }
+                    var s = document.createElement('script');
+                    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                    s.onload  = function(){ window.jspdf ? resolve(window.jspdf) : reject(new Error('jsPDF loaded but namespace missing')); };
+                    s.onerror = function(){ reject(new Error('Could not load jsPDF from CDN')); };
+                    document.head.appendChild(s);
+                });
+                return jsPDFLoad;
+            }
+            document.addEventListener('click', function(e){
+                var btn = e.target.closest('.btgsb-pdf-dl');
+                if (!btn) return;
+                e.preventDefault();
+                var pngUrl = btn.getAttribute('data-png');
+                var fname  = btn.getAttribute('data-fname') || '';
+                if (!pngUrl) return;
+                var orig = btn.innerHTML;
+                btn.innerHTML = '\u23F3 Building PDF\u2026';
+                btn.disabled = true;
+                loadJsPDF().then(function(ns){
+                    var img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = function(){
+                        try {
+                            // Sheet is 22" wide by convention; height derived from aspect.
+                            var inW = 22;
+                            var inH = (img.naturalHeight / img.naturalWidth) * inW;
+                            var pdf = new ns.jsPDF({
+                                orientation: inH > inW ? 'portrait' : 'landscape',
+                                unit: 'in',
+                                format: [inW, inH],
+                                compress: true
+                            });
+                            pdf.addImage(img, 'PNG', 0, 0, inW, inH, undefined, 'FAST');
+                            var name = fname || (pngUrl.split('/').pop() || 'gang-sheet.png').replace(/\.png(\?.*)?$/i, '.pdf');
+                            pdf.save(name);
+                            btn.innerHTML = '\u2713 Downloaded';
+                            setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; }, 1800);
+                        } catch (err) {
+                            alert('Could not generate PDF: ' + err.message);
+                            btn.innerHTML = orig; btn.disabled = false;
+                        }
+                    };
+                    img.onerror = function(){
+                        alert('Could not load PNG for PDF conversion. Check that the file still exists on the server.');
+                        btn.innerHTML = orig; btn.disabled = false;
+                    };
+                    img.src = pngUrl;
+                }).catch(function(err){
+                    alert(err.message);
+                    btn.innerHTML = orig; btn.disabled = false;
+                });
+            });
+        })();
+        </script>
+        <?php
+    });
+
+    add_action('admin_init', function () {
+        if (empty($_GET['btgsb_await_toggle'])) return;
+        if (!current_user_can('manage_woocommerce')) return;
+        if (!wp_verify_nonce($_GET['_wpnonce'] ?? '', 'btgsb_await_toggle')) return;
+        $id = intval($_GET['btgsb_await_toggle']);
+        btdtf_await_set($id, !btdtf_await_is($id));
+        wp_safe_redirect(remove_query_arg(['btgsb_await_toggle', '_wpnonce'], wp_get_referer() ?: admin_url('admin.php?page=wc-orders')));
+        exit;
+    });
+
+    add_filter('woocommerce_shop_order_list_table_columns', function ($cols) {
+        $new = [];
+        foreach ($cols as $k => $v) {
+            $new[$k] = $v;
+            if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
+        }
+        if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
+        return $new;
+    });
+
+    add_action('woocommerce_shop_order_list_table_custom_column', function ($col, $order) {
+        if ($col === 'btgsb_await') echo btdtf_await_badge($order->get_id());
+    }, 10, 2);
+
+    add_filter('manage_edit-shop_order_columns', function ($cols) {
+        $new = [];
+        foreach ($cols as $k => $v) {
+            $new[$k] = $v;
+            if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
+        }
+        if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
+        return $new;
+    });
+
+    add_action('manage_shop_order_posts_custom_column', function ($col, $post_id) {
+        if ($col === 'btgsb_await') echo btdtf_await_badge($post_id);
+    }, 10, 2);
+
+    add_filter('bulk_actions-woocommerce_page_wc-orders', 'btdtf_await_bulk_actions');
+
+    add_filter('bulk_actions-edit-shop_order',            'btdtf_await_bulk_actions');
+
+    add_filter('handle_bulk_actions-woocommerce_page_wc-orders', 'btdtf_await_bulk_handle', 10, 3);
+
+    add_filter('handle_bulk_actions-edit-shop_order',            'btdtf_await_bulk_handle', 10, 3);
+
+    add_action('admin_notices', function () {
+        if (isset($_GET['btgsb_await_bulk']))
+            echo '<div class="notice notice-success is-dismissible"><p>'
+               . intval($_GET['btgsb_await_bulk']) . ' order(s) updated.</p></div>';
+    });
+
+    add_filter('views_woocommerce_page_wc-orders', 'btdtf_await_view_link');
+
+    add_filter('views_edit-shop_order',            'btdtf_await_view_link');
+
+    add_filter('woocommerce_order_list_table_prepare_items_query_args', function ($args) {
+        if (empty($_GET['btgsb_awaiting'])) return $args;
+        $args['meta_query'][] = ['key' => BTDTF_AWAIT_META, 'value' => 'yes'];
+        return $args;
+    });
+
+    add_filter('request', function ($vars) {
+        if (empty($_GET['btgsb_awaiting'])) return $vars;
+        if (($vars['post_type'] ?? '') !== 'shop_order') return $vars;
+        $vars['meta_key']   = BTDTF_AWAIT_META;
+        $vars['meta_value'] = 'yes';
+        return $vars;
+    });
 }
