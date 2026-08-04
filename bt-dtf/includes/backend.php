@@ -777,7 +777,7 @@ function btdtf_register_hooks() {
     });
 
     add_action('admin_menu', function () {
-        add_menu_page('BT Transfers', 'BT Transfers', 'manage_options', 'btgsb-settings', 'btdtf_settings_page', 'dashicons-layout', 56);
+        add_menu_page('BT Transfers', 'BT Transfers', 'manage_options', 'btgsb-settings', 'btdtf_settings_page', 'dashicons-layout', '58.4');
     });
 
     add_action('wp_ajax_btgsb_save_sheet',        'btdtf_ajax_save_sheet');

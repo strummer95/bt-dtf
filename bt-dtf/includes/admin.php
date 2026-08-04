@@ -9,6 +9,11 @@
 if (!defined('ABSPATH')) exit;
 
 add_action('admin_menu', function () {
+    // Rename the auto-created first submenu item from "BT Transfers" to
+    // "Sheet Settings" so the group reads cleanly.
+    global $submenu;
+    if (isset($submenu['btgsb-settings'][0][0])) $submenu['btgsb-settings'][0][0] = 'Sheet Settings';
+
     add_submenu_page(
         'btgsb-settings',
         'Status & Updates',
