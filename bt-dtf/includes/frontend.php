@@ -1820,7 +1820,19 @@ jQuery(function($){
     }
 
     /* -- Card Events --------------------------------------------- */
-    $('#btgsb-design-list').on('input change','.btgsb-w-in',function(){
+    /* W/H commit on 'change' only (blur or Enter), never on 'input'.
+       Committing per keystroke clamped the partial value and then called
+       refresh(), which runs updateCards() -> $list.empty() and destroys the
+       very field being typed into. Typing "12" clamped "1" and blew the
+       input away before the "2" could land. Same fix the qty field got. */
+    $('#btgsb-design-list').on('focusin','.btgsb-w-in,.btgsb-h-in',function(){
+        var el = this;
+        setTimeout(function(){ el.select(); }, 0);
+    });
+    $('#btgsb-design-list').on('keydown','.btgsb-w-in,.btgsb-h-in',function(e){
+        if (e.key === 'Enter') { e.preventDefault(); this.blur(); }
+    });
+    $('#btgsb-design-list').on('change','.btgsb-w-in',function(){
         var id = $(this).closest('[data-id]').data('id');
         var d  = designs.find(function(x){return x.id===id;});
         if (!d) return;
@@ -1830,9 +1842,10 @@ jQuery(function($){
             d.heightIn = parseFloat((d.widthIn * displayHperW).toFixed(2));
             $(this).closest('[data-id]').find('.btgsb-h-in').val(d.heightIn.toFixed(2));
         }
+        this.value = d.widthIn.toFixed(2);
         refresh();
     });
-    $('#btgsb-design-list').on('input change','.btgsb-h-in',function(){
+    $('#btgsb-design-list').on('change','.btgsb-h-in',function(){
         var id = $(this).closest('[data-id]').data('id');
         var d  = designs.find(function(x){return x.id===id;});
         if (!d) return;
@@ -1842,6 +1855,7 @@ jQuery(function($){
             d.widthIn = Math.max(0.25, Math.min(parseFloat((d.heightIn * displayWperH).toFixed(2)), SHEET_W));
             $(this).closest('[data-id]').find('.btgsb-w-in').val(d.widthIn.toFixed(2));
         }
+        this.value = d.heightIn.toFixed(2);
         refresh();
     });
     $('#btgsb-design-list').on('click','.btgsb-lock-btn',function(){
