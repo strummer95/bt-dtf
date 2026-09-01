@@ -159,6 +159,11 @@ function btdtf_render_builder() {
         'QOp+71jE8mzWRyMpVzZqkWvo1RPveAakGGu0+75BCCP5a/NqptQ9bjSb2qm68v7dXwRFvHfsq9NSENmxHzA9AvKR'.
         'iYfB+wBFnBB2kyewaEX1f7sYAAAAAA==';
 
+    // Staff-only affordances. The builder is a public page, so anything
+    // that exists to speed up in-house order entry is gated on the same
+    // capability the rest of the plugin uses for shop staff.
+    $btdtf_staff = function_exists('current_user_can') && current_user_can('manage_woocommerce');
+
     ob_start(); ?>
 <!-- DTF Studio - Gang Sheet Builder -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -909,6 +914,7 @@ function btdtf_render_builder() {
           <label class="nn-label nn-roster-label">Roster &mdash; name and number per row</label>
           <div id="btgsb-roster-grid" class="nn-mode-both"></div>
           <button type="button" id="btgsb-roster-add" class="nn-add-btn">+ Add row</button>
+          <?php if ($btdtf_staff): ?>
           <button type="button" id="btgsb-roster-paste-toggle" class="nn-add-btn">&#9776; Paste a list</button>
           <div id="btgsb-roster-paste-wrap">
             <textarea id="btgsb-roster-paste-box" rows="8" placeholder="Smith&#9;12&#10;Jones, 7&#10;Big Red 17&#10;&#9;24"></textarea>
@@ -916,6 +922,7 @@ function btdtf_render_builder() {
             <button type="button" id="btgsb-roster-paste-apply" class="nn-add-btn">Fill roster</button>
             <button type="button" id="btgsb-roster-paste-cancel" class="nn-add-btn">Cancel</button>
           </div>
+          <?php endif; ?>
         </div>
         <div>
           <label class="nn-label">Font style</label>
