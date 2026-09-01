@@ -297,6 +297,24 @@ function btdtf_render_builder() {
     letter-spacing:normal !important;
 }
 .nn-add-btn:hover{border-color:#27267e !important;background:#f0eff8 !important}
+#btgsb-roster-paste-wrap{display:none !important;margin-top:6px !important}
+#btgsb-roster-paste-wrap.nn-paste-open{display:block !important}
+#btgsb-roster-paste-box {
+    width:100% !important;
+    box-sizing:border-box !important;
+    font-family:inherit !important;
+    font-size:12px !important;
+    line-height:1.5 !important;
+    padding:6px 8px !important;
+    border:1px solid #c0c9e8 !important;
+    border-radius:5px !important;
+    background:#fff !important;
+    color:#333 !important;
+    resize:vertical !important;
+    min-height:0 !important;
+    max-width:none !important;
+}
+.nn-paste-hint{font-size:11px !important;color:#777 !important;margin:4px 0 2px !important;line-height:1.4 !important}
 .nn-font-grid{display:grid !important;grid-template-columns:repeat(5,1fr) !important;gap:4px !important;width:100% !important}
 .nn-font-btn {
     padding:5px 2px !important;
@@ -891,6 +909,13 @@ function btdtf_render_builder() {
           <label class="nn-label nn-roster-label">Roster &mdash; name and number per row</label>
           <div id="btgsb-roster-grid" class="nn-mode-both"></div>
           <button type="button" id="btgsb-roster-add" class="nn-add-btn">+ Add row</button>
+          <button type="button" id="btgsb-roster-paste-toggle" class="nn-add-btn">&#9776; Paste a list</button>
+          <div id="btgsb-roster-paste-wrap">
+            <textarea id="btgsb-roster-paste-box" rows="8" placeholder="Smith&#9;12&#10;Jones, 7&#10;Big Red 17&#10;&#9;24"></textarea>
+            <p class="nn-paste-hint">One per line, number after the name, separated by a tab, comma or space. Leave the name off for a number-only piece. This replaces whatever is in the roster now.</p>
+            <button type="button" id="btgsb-roster-paste-apply" class="nn-add-btn">Fill roster</button>
+            <button type="button" id="btgsb-roster-paste-cancel" class="nn-add-btn">Cancel</button>
+          </div>
         </div>
         <div>
           <label class="nn-label">Font style</label>
@@ -2096,6 +2121,68 @@ jQuery(function($){
 
     $('#btgsb-roster-add').on('click', function(){
         nnAddRow(true);
+    });
+
+    // -- Paste a list -------------------------------------------------
+    // Accepts one roster entry per line. The number may be separated from
+    // the name by a tab, comma, semicolon, pipe or plain spaces. A line
+    // that is only digits is treated as a number with no name, which is
+    // how a number-only jersey comes across.
+    function nnParseRosterLine(line) {
+        var raw = String(line).replace(/\u00a0/g, ' ').trim();
+        if (!raw) return null;
+        var name = '', num = '', m;
+        m = raw.match(/^(.*?)[\t,;|]\s*([^\t,;|]*)$/);
+        if (m) {
+            name = m[1].trim();
+            num  = m[2].trim();
+        } else {
+            m = raw.match(/^(.*\S)\s+(\d{1,4})$/);
+            if (m) { name = m[1].trim(); num = m[2]; }
+            else if (/^\d{1,4}$/.test(raw)) { num = raw; }
+            else { name = raw; }
+        }
+        // Anything in the number slot that is not 1-4 digits was part of
+        // the name after all, so fold it back rather than dropping it.
+        if (!/^\d{1,4}$/.test(num)) {
+            if (num) { name = (name + ' ' + num).trim(); }
+            num = '';
+        }
+        if (!name && !num) return null;
+        return { name: name, num: num };
+    }
+
+    $('#btgsb-roster-paste-toggle').on('click', function(){
+        var $wrap = $('#btgsb-roster-paste-wrap');
+        $wrap.toggleClass('nn-paste-open');
+        if ($wrap.hasClass('nn-paste-open')) { $('#btgsb-roster-paste-box').focus(); }
+    });
+
+    $('#btgsb-roster-paste-cancel').on('click', function(){
+        $('#btgsb-roster-paste-wrap').removeClass('nn-paste-open');
+    });
+
+    $('#btgsb-roster-paste-apply').on('click', function(){
+        var text = $('#btgsb-roster-paste-box').val() || '';
+        var rows = [];
+        text.split(/\r\n|\r|\n/).forEach(function(line){
+            var parsed = nnParseRosterLine(line);
+            if (parsed) { rows.push(parsed); }
+        });
+        if (!rows.length) {
+            $('#btgsb-namesnum-status').text('Nothing to import - paste one name and number per line.');
+            return;
+        }
+        $rosterGrid.empty();
+        rows.forEach(function(parsed){
+            var $row = nnAddRow(false);
+            $row.find('.nn-row-name').val(parsed.name);
+            $row.find('.nn-row-number').val(parsed.num);
+        });
+        nnUpdateDeleteState();
+        $('#btgsb-roster-paste-box').val('');
+        $('#btgsb-roster-paste-wrap').removeClass('nn-paste-open');
+        $('#btgsb-namesnum-status').text(rows.length + (rows.length === 1 ? ' row' : ' rows') + ' loaded into the roster.');
     });
 
     $rosterGrid.on('click', '.nn-row-delete', function(){
