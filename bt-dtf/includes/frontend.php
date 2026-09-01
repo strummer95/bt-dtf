@@ -319,6 +319,49 @@ function btdtf_render_builder() {
     min-height:0 !important;
     max-width:none !important;
 }
+.nn-paste-actions{display:flex !important;align-items:center !important;gap:10px !important;margin-top:7px !important}
+#btgsb-roster-paste-apply {
+    flex:1 1 auto !important;
+    padding:9px 14px !important;
+    background:#27267e !important;
+    color:#fff !important;
+    border:none !important;
+    border-radius:6px !important;
+    font-family:inherit !important;
+    font-size:13px !important;
+    font-weight:700 !important;
+    line-height:1.2 !important;
+    cursor:pointer !important;
+    width:auto !important;
+    height:auto !important;
+    min-width:0 !important;
+    max-width:none !important;
+    box-shadow:0 1px 3px rgba(39,38,126,.28) !important;
+    text-transform:none !important;
+    letter-spacing:normal !important;
+    display:block !important;
+}
+#btgsb-roster-paste-apply:hover{filter:brightness(1.12)}
+#btgsb-roster-paste-cancel {
+    flex:0 0 auto !important;
+    padding:0 !important;
+    background:none !important;
+    border:none !important;
+    color:#999 !important;
+    font-family:inherit !important;
+    font-size:12px !important;
+    font-weight:600 !important;
+    line-height:1.2 !important;
+    cursor:pointer !important;
+    width:auto !important;
+    height:auto !important;
+    min-width:0 !important;
+    box-shadow:none !important;
+    text-transform:none !important;
+    letter-spacing:normal !important;
+    text-decoration:underline !important;
+}
+#btgsb-roster-paste-cancel:hover{color:#c0392b !important}
 .nn-font-grid{display:grid !important;grid-template-columns:repeat(5,1fr) !important;gap:4px !important;width:100% !important}
 .nn-font-btn {
     padding:5px 2px !important;
@@ -917,8 +960,10 @@ function btdtf_render_builder() {
           <button type="button" id="btgsb-roster-paste-toggle" class="nn-add-btn">&#9776; Paste a list</button>
           <div id="btgsb-roster-paste-wrap">
             <textarea id="btgsb-roster-paste-box" rows="10" placeholder="FORMAT&#10;&#10;Smith 9&#10;Jones 22&#10;&#10;or&#10;&#10;Smith, 9&#10;Jones, 22"></textarea>
-            <button type="button" id="btgsb-roster-paste-apply" class="nn-add-btn">Fill roster</button>
-            <button type="button" id="btgsb-roster-paste-cancel" class="nn-add-btn">Cancel</button>
+            <div class="nn-paste-actions">
+              <button type="button" id="btgsb-roster-paste-apply">&#8595; Fill roster</button>
+              <button type="button" id="btgsb-roster-paste-cancel">Cancel</button>
+            </div>
           </div>
           <?php endif; ?>
         </div>
