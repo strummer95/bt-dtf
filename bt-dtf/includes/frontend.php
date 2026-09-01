@@ -319,7 +319,21 @@ function btdtf_render_builder() {
     min-height:0 !important;
     max-width:none !important;
 }
-.nn-paste-hint{font-size:11px !important;color:#777 !important;margin:4px 0 2px !important;line-height:1.4 !important}
+.nn-paste-eg{display:flex !important;gap:6px !important;margin:5px 0 2px !important}
+.nn-paste-eg pre {
+    flex:1 1 0 !important;
+    margin:0 !important;
+    padding:5px 7px !important;
+    background:#f8f9ff !important;
+    border:1px solid #e4e7f5 !important;
+    border-radius:4px !important;
+    font-family:ui-monospace,Menlo,Consolas,monospace !important;
+    font-size:11px !important;
+    line-height:1.45 !important;
+    color:#777 !important;
+    white-space:pre !important;
+    overflow:hidden !important;
+}
 .nn-font-grid{display:grid !important;grid-template-columns:repeat(5,1fr) !important;gap:4px !important;width:100% !important}
 .nn-font-btn {
     padding:5px 2px !important;
@@ -918,7 +932,12 @@ function btdtf_render_builder() {
           <button type="button" id="btgsb-roster-paste-toggle" class="nn-add-btn">&#9776; Paste a list</button>
           <div id="btgsb-roster-paste-wrap">
             <textarea id="btgsb-roster-paste-box" rows="8" placeholder="Smith&#9;12&#10;Jones, 7&#10;Big Red 17&#10;&#9;24"></textarea>
-            <p class="nn-paste-hint">One per line, number after the name, separated by a tab, comma or space. Leave the name off for a number-only piece. This replaces whatever is in the roster now.</p>
+            <div class="nn-paste-eg">
+              <pre>Smith 9
+Jones 22</pre>
+              <pre>Smith, 9
+Jones, 22</pre>
+            </div>
             <button type="button" id="btgsb-roster-paste-apply" class="nn-add-btn">Fill roster</button>
             <button type="button" id="btgsb-roster-paste-cancel" class="nn-add-btn">Cancel</button>
           </div>
