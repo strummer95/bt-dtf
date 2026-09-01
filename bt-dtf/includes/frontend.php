@@ -1600,6 +1600,27 @@ jQuery(function($){
     }
 
     /* -- Render -------------------------------------------------- */
+    /* -- Transparency checkerboard ------------------------------- */
+    // The sheet used to preview as flat white, which hid white art
+    // entirely. Same checker Photoshop uses for transparency, built once
+    // and reused. Preview only - the export path passes showGuides false
+    // and never fills a background.
+    var _checkerTile = null;
+    function getCheckerPattern(ctx) {
+        if (!_checkerTile) {
+            var SQ = 8;
+            _checkerTile = document.createElement('canvas');
+            _checkerTile.width = _checkerTile.height = SQ * 2;
+            var tctx = _checkerTile.getContext('2d');
+            tctx.fillStyle = '#ffffff';
+            tctx.fillRect(0, 0, SQ * 2, SQ * 2);
+            tctx.fillStyle = '#cccccc';
+            tctx.fillRect(0, 0, SQ, SQ);
+            tctx.fillRect(SQ, SQ, SQ, SQ);
+        }
+        return ctx.createPattern(_checkerTile, 'repeat');
+    }
+
     function renderSheet(ctx, canvas, placed, sheetH, dpi, showGuides, showRulers) {
         var rulerOffset = showRulers ? RULER_PX : 0;
         var labelPad = showRulers ? 14 : 0;
@@ -1616,9 +1637,9 @@ jQuery(function($){
         ctx.translate(rulerOffset, rulerOffset);
 
         if (showGuides) {
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = getCheckerPattern(ctx);
             ctx.fillRect(0, 0, sheetPxW, sheetPxH);
-            ctx.fillStyle = 'rgba(160,160,200,0.6)';
+            ctx.fillStyle = 'rgba(90,90,140,0.55)';
             for (var gx=dpi; gx<sheetPxW; gx+=dpi) {
                 for (var gy=dpi; gy<sheetPxH; gy+=dpi) {
                     ctx.beginPath(); ctx.arc(gx, gy, 1.2, 0, Math.PI*2); ctx.fill();
