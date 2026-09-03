@@ -1002,6 +1002,12 @@ function btdtf_render_builder() {
             <input id="btgsb-namesnum-number-height" type="number" step="0.25" min="0.5" max="14" value="8">
           </div>
         </div>
+        <div class="nn-row">
+          <div>
+            <label class="nn-label" for="btgsb-namesnum-max-width">Max name width (in) &mdash; 0 for no limit</label>
+            <input id="btgsb-namesnum-max-width" type="number" step="0.5" min="0" max="<?php echo esc_attr($w); ?>" value="11">
+          </div>
+        </div>
         <div>
           <label class="nn-label">Color</label>
           <div id="btgsb-namesnum-color-mount"></div>
@@ -1809,6 +1815,7 @@ jQuery(function($){
                 color: b.color,
                 nameHeight: b.nameHeight,
                 numberHeight: b.numberHeight,
+                maxWidth: b.maxWidth || 0,
                 open: b.open,
                 items: b.items.map(function(it){
                     var di = -1;
@@ -2317,7 +2324,7 @@ jQuery(function($){
         nnAddRow(false);
     }
 
-    function renderTextPiece(text, fontKey, heightIn, color) {
+    function renderTextPiece(text, fontKey, heightIn, color, maxWidthIn) {
         return new Promise(function(resolve, reject){
             try {
                 var fontDef  = NN_FONTS[fontKey] || NN_FONTS.varsity;
@@ -2360,6 +2367,30 @@ jQuery(function($){
                     var ascent = m.actualBoundingBoxAscent;
                     var inkW   = m.actualBoundingBoxLeft   + m.actualBoundingBoxRight;
                     var inkH   = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+
+                    // Width cap. Height alone decides the size above, so a long
+                    // name like "giugiuondatbeat" at 2.5" tall came out wider
+                    // than the sheet. Shrink the whole piece proportionally
+                    // until it fits, which is what you would do by hand. The
+                    // letterforms keep their shape and the piece just ends up
+                    // shorter than the requested height.
+                    var capPx = (maxWidthIn > 0) ? (maxWidthIn * NN_RENDER_DPI - pad * 2) : 0;
+                    if (capPx > 0) {
+                        // Rounding the font size can leave it a hair over, so
+                        // re-measure and nudge again rather than trusting one pass.
+                        for (var guard = 0; guard < 4 && inkW > capPx; guard++) {
+                            var shrunkPx = Math.max(20, Math.floor(scaledPx * (capPx / inkW)));
+                            if (shrunkPx === scaledPx) break;
+                            scaledPx = shrunkPx;
+                            fontSpec = fontDef.weight + ' ' + scaledPx + 'px ' + fontDef.family;
+                            mctx.font = fontSpec;
+                            m = mctx.measureText(text);
+                            left   = m.actualBoundingBoxLeft;
+                            ascent = m.actualBoundingBoxAscent;
+                            inkW   = m.actualBoundingBoxLeft   + m.actualBoundingBoxRight;
+                            inkH   = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+                        }
+                    }
 
                     var outCanvas = document.createElement('canvas');
                     outCanvas.width  = Math.ceil(inkW) + pad * 2;
@@ -2413,6 +2444,22 @@ jQuery(function($){
                 oc.height = trimH + pad * 2;
                 oc.getContext('2d').drawImage(sc, minX, minY, trimW, trimH, pad, pad, trimW, trimH);
 
+                // Same width cap as the metrics path. This branch only runs on
+                // browsers without actualBoundingBox*, so it resamples the
+                // raster rather than re-setting the font size.
+                var capPxF = (maxWidthIn > 0) ? (maxWidthIn * NN_RENDER_DPI) : 0;
+                if (capPxF > 0 && oc.width > capPxF) {
+                    var sf = capPxF / oc.width;
+                    var oc2 = document.createElement('canvas');
+                    oc2.width  = Math.max(1, Math.round(oc.width  * sf));
+                    oc2.height = Math.max(1, Math.round(oc.height * sf));
+                    var o2ctx = oc2.getContext('2d');
+                    o2ctx.imageSmoothingEnabled = true;
+                    o2ctx.imageSmoothingQuality = 'high';
+                    o2ctx.drawImage(oc, 0, 0, oc2.width, oc2.height);
+                    oc = oc2;
+                }
+
                 resolve({
                     dataUrl: oc.toDataURL('image/png'),
                     naturalW: oc.width,
@@ -2449,6 +2496,9 @@ jQuery(function($){
         var fontKey = $('.nn-font-btn.nn-active').data('font') || 'varsity';
         var nameHeightIn   = parseFloat($('#btgsb-namesnum-name-height').val())   || 2.5;
         var numberHeightIn = parseFloat($('#btgsb-namesnum-number-height').val()) || 8;
+        var maxWidthIn     = parseFloat($('#btgsb-namesnum-max-width').val());
+        if (isNaN(maxWidthIn) || maxWidthIn < 0) maxWidthIn = 0;
+        if (maxWidthIn > SHEET_W) maxWidthIn = SHEET_W;
         var color = btColorGet($('#btgsb-namesnum-color-mount .bt-color'));
 
         if (!pieces.length) {
@@ -2471,13 +2521,14 @@ jQuery(function($){
             color: color,
             nameHeight: nameHeightIn,
             numberHeight: numberHeightIn,
+            maxWidth: maxWidthIn,
             open: true,
             items: []
         };
 
         var jobs = pieces.map(function(piece){
             var h = piece.kind === 'number' ? numberHeightIn : nameHeightIn;
-            return renderTextPiece(piece.text, fontKey, h, color).then(function(res){
+            return renderTextPiece(piece.text, fontKey, h, color, piece.kind === 'number' ? 0 : maxWidthIn).then(function(res){
                 var did = nextId++;
                 designs.push({
                     id: did,
@@ -2554,7 +2605,7 @@ jQuery(function($){
         if (!d) return Promise.resolve();
         var fontKey = item.fontOverride || batch.font;
         var h = item.kind === 'number' ? batch.numberHeight : batch.nameHeight;
-        return renderTextPiece(item.text, fontKey, h, batch.color).then(function(res){
+        return renderTextPiece(item.text, fontKey, h, batch.color, item.kind === 'number' ? 0 : batch.maxWidth).then(function(res){
             d.dataUrl  = res.dataUrl;
             d.nW       = res.naturalW;
             d.nH       = res.naturalH;
@@ -2633,7 +2684,9 @@ jQuery(function($){
                     '<input type="number" class="bb-name-h" step="0.25" min="0.5" max="14" value="' + b.nameHeight + '"></div>' +
                   '<div><label class="nn-label">Number height (in)</label>' +
                     '<input type="number" class="bb-number-h" step="0.25" min="0.5" max="14" value="' + b.numberHeight + '"></div>' +
-                '</div>'
+                '</div>' +
+                '<div class="nn-row"><div><label class="nn-label">Max name width (in) &mdash; 0 for no limit</label>' +
+                  '<input type="number" class="bb-max-w" step="0.5" min="0" max="' + SHEET_W + '" value="' + (b.maxWidth || 0) + '"></div></div>'
             );
 
             // Color (Hex / CMYK control)
@@ -2745,6 +2798,18 @@ jQuery(function($){
         rerasterizeBatch(b);
     });
 
+    $('#btgsb-batch-list').on('change', '.bb-max-w', function(){
+        var bid = $(this).closest('.bb-card').data('bid');
+        var b = findBatch(bid);
+        if (!b) return;
+        var v = parseFloat(this.value);
+        if (isNaN(v) || v < 0 || v > SHEET_W) { this.value = (b.maxWidth || 0); return; }
+        if (v === (b.maxWidth || 0)) return;
+        pushUndoSnapshot();
+        b.maxWidth = v;
+        rerasterizeBatch(b);
+    });
+
     // Edit piece text
     $('#btgsb-batch-list').on('change', '.bb-item-text', function(){
         var $card = $(this).closest('.bb-card');
@@ -2800,7 +2865,7 @@ jQuery(function($){
         var jobs = newPieces.map(function(piece){
             var fontKey = b.font;
             var h = piece.kind === 'number' ? b.numberHeight : b.nameHeight;
-            return renderTextPiece(piece.text, fontKey, h, b.color).then(function(res){
+            return renderTextPiece(piece.text, fontKey, h, b.color, piece.kind === 'number' ? 0 : b.maxWidth).then(function(res){
                 var did = nextId++;
                 designs.push({
                     id: did,
@@ -2902,7 +2967,7 @@ jQuery(function($){
             batches: batches.map(function(b){
                 return {
                     id:b.id, name:b.name, font:b.font, color:b.color,
-                    nameHeight:b.nameHeight, numberHeight:b.numberHeight, open:b.open,
+                    nameHeight:b.nameHeight, numberHeight:b.numberHeight, maxWidth:b.maxWidth || 0, open:b.open,
                     items: b.items.map(function(it){
                         return { id:it.id, kind:it.kind, text:it.text, designId:it.designId, fontOverride:it.fontOverride };
                     })
@@ -2936,7 +3001,7 @@ jQuery(function($){
         batches = snap.batches.map(function(b){
             return {
                 id:b.id, name:b.name, font:b.font, color:b.color,
-                nameHeight:b.nameHeight, numberHeight:b.numberHeight, open:b.open,
+                nameHeight:b.nameHeight, numberHeight:b.numberHeight, maxWidth:b.maxWidth || 0, open:b.open,
                 items: b.items.map(function(it){
                     return { id:it.id, kind:it.kind, text:it.text, designId:it.designId, fontOverride:it.fontOverride };
                 })
@@ -3704,6 +3769,10 @@ jQuery(function($){
             batches.push({
                 id: bid, name: pb.name, font: pb.font, color: pb.color,
                 nameHeight: pb.nameHeight, numberHeight: pb.numberHeight,
+                // Batches saved before the width cap existed have no maxWidth.
+                // Default those to 0 so reopening an old sheet re-renders it
+                // exactly as the customer left it.
+                maxWidth: (typeof pb.maxWidth === 'number' ? pb.maxWidth : 0),
                 open: pb.open, items: items
             });
         });
