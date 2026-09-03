@@ -164,6 +164,13 @@ function btdtf_render_builder() {
     // capability the rest of the plugin uses for shop staff.
     $btdtf_staff = function_exists('current_user_can') && current_user_can('manage_woocommerce');
 
+    // The builder had no link to the cart. Once you added a sheet and then
+    // navigated back here, the only control was Add to Cart, which is
+    // disabled on an empty canvas, so there was no way to reach the cart
+    // again short of typing the URL. No item count is shown because this
+    // page can be cached and a stale count is worse than none.
+    $btdtf_cart_url = function_exists('wc_get_cart_url') ? wc_get_cart_url() : home_url('/cart');
+
     ob_start(); ?>
 <!-- DTF Studio - Gang Sheet Builder -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -899,6 +906,17 @@ function btdtf_render_builder() {
 #btgsb-roster-grid.nn-mode-names .nn-row-number{display:none !important}
 #btgsb-roster-grid.nn-mode-numbers .nn-row-name{display:none !important}
 #btgsb-roster-grid.nn-mode-numbers .nn-row-number{flex:1 1 auto !important;width:auto !important;min-width:0 !important;max-width:none !important;text-align:left !important}
+#btgsb-cart-link {
+    display:block !important;
+    text-align:center !important;
+    margin-top:9px !important;
+    font-family:inherit !important;
+    font-size:13px !important;
+    font-weight:700 !important;
+    color:#27267e !important;
+    text-decoration:underline !important;
+}
+#btgsb-cart-link:hover{filter:brightness(1.25)}
 #btgsb-namesnum-body.nn-gen-numbers .nn-name-h-wrap{display:none !important}
 #btgsb-namesnum-body.nn-gen-names .nn-number-h-wrap{display:none !important}
 
@@ -1065,6 +1083,7 @@ function btdtf_render_builder() {
         <button id="btgsb-save-submit" type="button" style="width:100%;padding:8px;background:#27267e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save to This Browser</button>
         <div id="btgsb-save-status" style="margin-top:6px;font-size:12px;color:#27267e"></div>
       </div>
+      <a id="btgsb-cart-link" href="<?php echo esc_url($btdtf_cart_url); ?>">&#128722; View cart</a>
       <div id="btgsb-status"></div>
       <p class="btgsb-hint" style="text-align:center;margin-top:8px">Priced on total sheet area (<?php echo $w; ?>" &times; height used) &nbsp;&middot;&nbsp; <span style="color:#27267e;font-weight:700">DTF Studio</span></p>
     </div>
