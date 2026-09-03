@@ -217,6 +217,24 @@ function btdtf_render_builder() {
     color:#1a1a2e;
     box-sizing:border-box;
 }
+#btgsb-cart-link {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    flex:0 0 auto !important;
+    width:28px !important;
+    height:28px !important;
+    box-sizing:border-box !important;
+    border:1px solid #27267e !important;
+    border-radius:6px !important;
+    background:#fff !important;
+    color:#27267e !important;
+    text-decoration:none !important;
+    box-shadow:none !important;
+    transition:background .1s,color .1s !important;
+}
+#btgsb-cart-link:hover{background:#27267e !important;color:#fff !important}
+#btgsb-cart-link svg{width:16px !important;height:16px !important;display:block !important}
 #btgsb-left{flex:0 0 360px;min-width:0;display:flex;flex-direction:column;gap:14px}
 #btgsb-right{flex:1;min-width:0;display:flex;flex-direction:column;gap:16px;position:sticky;top:20px}
 #btgsb-upload-zone{border:2px dashed #9b9ad4;border-radius:12px;padding:32px 20px;text-align:center;cursor:pointer;background:#f8f9ff;transition:border-color .15s,background .15s;user-select:none}
@@ -906,17 +924,6 @@ function btdtf_render_builder() {
 #btgsb-roster-grid.nn-mode-names .nn-row-number{display:none !important}
 #btgsb-roster-grid.nn-mode-numbers .nn-row-name{display:none !important}
 #btgsb-roster-grid.nn-mode-numbers .nn-row-number{flex:1 1 auto !important;width:auto !important;min-width:0 !important;max-width:none !important;text-align:left !important}
-#btgsb-cart-link {
-    display:block !important;
-    text-align:center !important;
-    margin-top:9px !important;
-    font-family:inherit !important;
-    font-size:13px !important;
-    font-weight:700 !important;
-    color:#27267e !important;
-    text-decoration:underline !important;
-}
-#btgsb-cart-link:hover{filter:brightness(1.25)}
 #btgsb-namesnum-body.nn-gen-numbers .nn-name-h-wrap{display:none !important}
 #btgsb-namesnum-body.nn-gen-names .nn-number-h-wrap{display:none !important}
 
@@ -1046,6 +1053,12 @@ function btdtf_render_builder() {
         <button id="btgsb-auto-layout-btn" type="button" title="Re-run auto layout from scratch"><span style="font-size:14px;line-height:1">&#x21BB;</span> Auto Layout</button>
         <button id="btgsb-zoom-out" title="Zoom out">&minus;</button>
         <button id="btgsb-zoom-in"  title="Zoom in">+</button>
+        <a id="btgsb-cart-link" href="<?php echo esc_url($btdtf_cart_url); ?>" title="View cart" aria-label="View cart">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="9" cy="21" r="1.4"/><circle cx="19" cy="21" r="1.4"/>
+            <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+          </svg>
+        </a>
       </div>
       <div id="btgsb-inspector">
         <span class="bi-label">Selected:</span>
@@ -1083,7 +1096,6 @@ function btdtf_render_builder() {
         <button id="btgsb-save-submit" type="button" style="width:100%;padding:8px;background:#27267e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save to This Browser</button>
         <div id="btgsb-save-status" style="margin-top:6px;font-size:12px;color:#27267e"></div>
       </div>
-      <a id="btgsb-cart-link" href="<?php echo esc_url($btdtf_cart_url); ?>">&#128722; View cart</a>
       <div id="btgsb-status"></div>
       <p class="btgsb-hint" style="text-align:center;margin-top:8px">Priced on total sheet area (<?php echo $w; ?>" &times; height used) &nbsp;&middot;&nbsp; <span style="color:#27267e;font-weight:700">DTF Studio</span></p>
     </div>
