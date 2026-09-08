@@ -453,7 +453,7 @@ function btdtf_render_builder() {
 }
 #btgsb-namesnum-generate:hover{filter:brightness(1.12)}
 #btgsb-namesnum-generate:disabled{opacity:.5 !important;cursor:not-allowed !important}
-#btgsb-namesnum-status{font-size:11px;color:#888;text-align:center;margin:0;min-height:14px}
+#btgsb-namesnum-status{font-size:11px;color:#888;text-align:center;margin:0;min-height:14px;line-height:1.5}
 #btgsb-empty-hint{color:#aaa;font-size:13px;line-height:1.6;text-align:center;padding:8px 4px}
 #btgsb-batch-list{display:flex !important;flex-direction:column !important;gap:14px !important}
 #btgsb-batch-list:empty{display:none !important}
@@ -1130,13 +1130,48 @@ jQuery(function($){
 
     var NN_RENDER_DPI = 200;
 
+    // charset is every character the embedded woff2 actually contains. Canvas
+    // silently falls back to a system font for anything missing, which is how
+    // a "$" ended up printing in Times next to athletic block letters. null
+    // means the face is a full system or Google font and needs no check.
+    var NN_ASCII_LETTERS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
     var NN_FONTS = {
-        varsity:  { family: "'DTFS_Varsity', serif",                                       weight: '400', label: 'Varsity'  },
-        athletic: { family: "'DTFS_Athletic', sans-serif",                                 weight: '400', label: 'Athletic' },
-        college:  { family: "'DTFS_College', serif",                                       weight: '400', label: 'College'  },
-        block:    { family: "'Passion One', sans-serif",                                   weight: '900', label: 'Block'    },
-        impact:   { family: "Impact, 'Haettenschweiler', 'Arial Narrow Bold', sans-serif", weight: '400', label: 'Impact'   }
+        varsity:  { family: "'DTFS_Varsity', serif",                                       weight: '400', label: 'Varsity',  charset: " &'-./" + NN_ASCII_LETTERS },
+        athletic: { family: "'DTFS_Athletic', sans-serif",                                 weight: '400', label: 'Athletic', charset: " '-."  + NN_ASCII_LETTERS },
+        college:  { family: "'DTFS_College', serif",                                       weight: '400', label: 'College',  charset: " &'-./" + NN_ASCII_LETTERS },
+        block:    { family: "'Passion One', sans-serif",                                   weight: '900', label: 'Block',    charset: null },
+        impact:   { family: "Impact, 'Haettenschweiler', 'Arial Narrow Bold', sans-serif", weight: '400', label: 'Impact',   charset: null }
     };
+
+    // Which characters in this text the chosen font cannot draw.
+    function nnMissingGlyphs(text, fontKey) {
+        var def = NN_FONTS[fontKey] || NN_FONTS.varsity;
+        if (!def.charset) return [];
+        var seen = {}, out = [];
+        String(text || '').split('').forEach(function(ch){
+            if (def.charset.indexOf(ch) === -1 && !seen[ch]) { seen[ch] = 1; out.push(ch); }
+        });
+        return out;
+    }
+
+    // One warning line covering every piece in a batch that has a character
+    // the font is missing. Returns '' when everything is drawable.
+    function nnGlyphWarning(pieces, fontKey) {
+        var def = NN_FONTS[fontKey] || NN_FONTS.varsity;
+        var bad = [], chars = {};
+        pieces.forEach(function(p){
+            var miss = nnMissingGlyphs(p.text, fontKey);
+            if (miss.length) {
+                bad.push(p.text);
+                miss.forEach(function(c){ chars[c] = 1; });
+            }
+        });
+        if (!bad.length) return '';
+        var list = Object.keys(chars).join(' ');
+        return 'Heads up: ' + def.label + ' has no ' + list + ' character, so '
+             + (bad.length === 1 ? bad[0] + ' will print' : bad.length + ' pieces (' + bad.slice(0, 3).join(', ') + (bad.length > 3 ? ', \u2026' : '') + ') will print')
+             + ' that part in a substitute font. Switch to Block or Impact, or edit the text.';
+    }
 
     var RULER_PX = 24;
     var RESIZE_EDGE_IN = 0.18;
@@ -2611,7 +2646,12 @@ jQuery(function($){
                 refresh();
                 nnResetRoster();
                 $btn.prop('disabled', false);
-                nnSetStatus('Added ' + batch.items.length + ' piece' + (batch.items.length === 1 ? '' : 's') + ' to your sheet.', false);
+                var warn = nnGlyphWarning(batch.items, batch.font);
+                if (warn) {
+                    nnSetStatus(warn, true);
+                } else {
+                    nnSetStatus('Added ' + batch.items.length + ' piece' + (batch.items.length === 1 ? '' : 's') + ' to your sheet.', false);
+                }
             });
         });
     });
@@ -2636,6 +2676,10 @@ jQuery(function($){
         if (!d) return Promise.resolve();
         var fontKey = item.fontOverride || batch.font;
         var h = item.kind === 'number' ? batch.numberHeight : batch.nameHeight;
+        var miss = nnMissingGlyphs(item.text, fontKey);
+        if (miss.length) {
+            nnSetStatus(nnGlyphWarning([item], fontKey), true);
+        }
         return renderTextPiece(item.text, fontKey, h, batch.color, item.kind === 'number' ? 0 : batch.maxWidth).then(function(res){
             d.dataUrl  = res.dataUrl;
             d.nW       = res.naturalW;
