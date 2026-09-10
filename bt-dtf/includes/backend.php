@@ -269,16 +269,30 @@ function btdtf_production_files_html($order, $context) {
               . 'in the ZIP below &mdash; each filename includes the number of copies to print.</p>';
     }
 
+    // Orders with a combined sheet get the PDF link in the Production Sheet
+    // block. Orders without one get it here, so every order has exactly one.
+    $pdf_link = '';
+    if (!$combined_made && $zip_url && !empty($manifest) && method_exists($order, 'get_id')) {
+        $pdf_link = btdtf_pdf_page_url($order->get_id());
+    }
+
     if ($zip_url) {
         $zip_name = $dl_base . '-production-files.zip';
         if ($context === 'email') {
             $out .= '<a href="'.esc_url($zip_url).'" download="'.esc_attr($zip_name).'" '
-                  . 'style="display:inline-block;margin:4px 0;background:'.$accent.';color:#fff;'
+                  . 'style="display:inline-block;margin:4px 8px 4px 0;background:'.$accent.';color:#fff;'
                   . 'padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">'
                   . 'Download Individual Files (ZIP)</a>';
+            if ($pdf_link) {
+                $out .= '<a href="'.esc_url($pdf_link).'" style="display:inline-block;margin:4px 0;background:#c0392b;color:#fff;'
+                      . 'padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4C4; Download PDF</a>';
+            }
         } else {
             $out .= '<a href="'.esc_url($zip_url).'" download="'.esc_attr($zip_name).'" '
                   . 'style="font-weight:bold;text-decoration:none">Download Individual Files (ZIP)</a>';
+            if ($pdf_link) {
+                $out .= ' &nbsp; <a href="'.esc_url($pdf_link).'" target="_blank" rel="noopener" style="font-weight:bold;color:#c0392b;text-decoration:underline">&#x1F4C4; Download PDF</a>';
+            }
         }
     }
 
@@ -427,6 +441,25 @@ function btdtf_ajax_add_to_cart() {
     $manifest_raw = isset($_POST['manifest']) ? wp_unslash($_POST['manifest']) : '';
     $manifest_decoded = json_decode($manifest_raw, true);
     $manifest_json = is_array($manifest_decoded) ? wp_json_encode($manifest_decoded) : '';
+    // Exact piece placements, so the print PDFs match what the customer laid
+    // out. Each entry: i = index into the manifest, x/y/w/h in inches, r = turned 90.
+    $layout_json = '';
+    $layout_decoded = json_decode(isset($_POST['layout']) ? wp_unslash($_POST['layout']) : '', true);
+    if (is_array($layout_decoded) && isset($layout_decoded['p']) && is_array($layout_decoded['p'])) {
+        $clean = ['w' => round(floatval($layout_decoded['w'] ?? 22), 4), 'h' => round(floatval($layout_decoded['h'] ?? 0), 4), 'p' => []];
+        foreach ($layout_decoded['p'] as $pl) {
+            if (!is_array($pl)) continue;
+            $clean['p'][] = [
+                'i' => intval($pl['i'] ?? -1),
+                'x' => round(floatval($pl['x'] ?? 0), 4),
+                'y' => round(floatval($pl['y'] ?? 0), 4),
+                'w' => round(floatval($pl['w'] ?? 0), 4),
+                'h' => round(floatval($pl['h'] ?? 0), 4),
+                'r' => empty($pl['r']) ? 0 : 1,
+            ];
+        }
+        if ($clean['p']) $layout_json = wp_json_encode($clean);
+    }
     if ($sq_in <= 0 || $price <= 0) wp_send_json_error('Invalid order data.');
     WC()->cart->empty_cart();
     $key = WC()->cart->add_to_cart($pid, 1, 0, [], [
@@ -436,6 +469,7 @@ function btdtf_ajax_add_to_cart() {
         'btgsb_zip_url'    => $zip_url,
         'btgsb_combined'   => $combined,
         'btgsb_manifest'   => $manifest_json,
+        'btgsb_layout'     => $layout_json,
         'btgsb_size'       => round($width_in,2).'" x '.round($height_in,2).'"',
         'btgsb_item_count' => $pieces,
     ]);
@@ -478,81 +512,103 @@ function btdtf_ajax_add_to_cart() {
 // Adds PNG + PDF download buttons after the order table for orders that
 // have a combined sheet PNG. ONLY in the admin new_order email.
 
-/* ── Hidden admin page — generates PDF in the browser via jsPDF ── */
-// The "Download PDF" button in the admin email points here. Page is admin-only
-// (auth via WP login + manage_woocommerce capability), loads jsPDF, fetches
-// the PNG, wraps it into a one-page 22"-wide PDF, triggers download. No
-// server-side PDF library / Imagick / Ghostscript required.
+/* ── Hidden admin page: print-ready PDFs, built in the browser ── */
+// The Download PDF links (order screen and admin email) point here. Admin
+// only (manage_woocommerce). The work happens in assets/pdf-export.js:
+// every piece comes from the order's production ZIP at its own resolution,
+// and a sheet longer than one PDF page allows (200") is split into several
+// PDFs between pieces, never through one. No server-side PDF library,
+// Imagick or Ghostscript needed.
+
+function btdtf_is_upload_url($url) {
+    if (!$url) return false;
+    $upload_dir = wp_upload_dir();
+    $base = $upload_dir['baseurl'];
+    foreach ([$base, str_replace('http://', 'https://', $base), str_replace('https://', 'http://', $base)] as $b) {
+        if (strpos($url, $b) === 0) return true;
+    }
+    return false;
+}
+
+// Production files for an order: ZIP, manifest, saved layout, combined PNG.
+function btdtf_pdf_job_for_order($order) {
+    $job = ['zip' => '', 'manifest' => [], 'layout' => null, 'sheet' => ''];
+    foreach ($order->get_items() as $item) {
+        if (!is_object($item) || !method_exists($item, 'get_meta')) continue;
+        $z = $item->get_meta('_btgsb_zip_url');
+        if ($z && !$job['zip']) $job['zip'] = $z;
+        $m = $item->get_meta('_btgsb_manifest');
+        if ($m && !$job['manifest']) { $d = json_decode($m, true); if (is_array($d)) $job['manifest'] = $d; }
+        $l = $item->get_meta('_btgsb_layout');
+        if ($l && !$job['layout']) { $d = json_decode($l, true); if (is_array($d)) $job['layout'] = $d; }
+        $sh = $item->get_meta('_btgsb_sheet_url');
+        if (!$sh) $sh = $item->get_meta('Sheet File'); // legacy
+        if ($sh && !$job['sheet']) $job['sheet'] = $sh;
+    }
+    return $job;
+}
+
+function btdtf_pdf_page_url($order_id) {
+    return add_query_arg(['page' => 'btgsb-pdf-download', 'oid' => (int) $order_id], admin_url('admin.php'));
+}
 
 function btdtf_render_pdf_download_page() {
     if (!current_user_can('manage_woocommerce')) wp_die('Unauthorized');
+    $oid       = isset($_GET['oid'])   ? absint($_GET['oid']) : 0;
     $sheet_url = isset($_GET['sheet']) ? esc_url_raw(wp_unslash($_GET['sheet'])) : '';
     $order_no  = isset($_GET['order']) ? preg_replace('/[^A-Za-z0-9_-]/', '', wp_unslash($_GET['order'])) : '';
-    if (!$sheet_url) {
-        echo '<div class="wrap"><h1>Generate PDF</h1><p>No sheet URL provided.</p></div>';
+
+    $order = ($oid && function_exists('wc_get_order')) ? wc_get_order($oid) : null;
+    // Links in emails sent before 0.7.0 carry only ?sheet=&order=. Look the
+    // order up by number and use it only if that order really owns this sheet.
+    if (!$order && $order_no !== '' && ctype_digit($order_no) && $sheet_url && function_exists('wc_get_order')) {
+        $cand = wc_get_order((int) $order_no);
+        if ($cand) {
+            $cj = btdtf_pdf_job_for_order($cand);
+            if ($cj['sheet'] && basename((string) wp_parse_url($cj['sheet'], PHP_URL_PATH)) === basename((string) wp_parse_url($sheet_url, PHP_URL_PATH))) {
+                $order = $cand;
+            }
+        }
+    }
+
+    if ($order) {
+        $job  = btdtf_pdf_job_for_order($order);
+        $name = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $order->get_order_number());
+    } else {
+        $job  = ['zip' => '', 'manifest' => [], 'layout' => null, 'sheet' => $sheet_url];
+        $name = $order_no;
+    }
+    // Only URLs inside uploads are handed to the browser.
+    if (!btdtf_is_upload_url($job['zip']))   $job['zip']   = '';
+    if (!btdtf_is_upload_url($job['sheet'])) $job['sheet'] = '';
+    if (!$job['manifest']) $job['zip'] = '';
+
+    if (!$job['zip'] && !$job['sheet']) {
+        echo '<div class="wrap"><h1>Generate PDF</h1><p>No production files found for this order.</p></div>';
         return;
     }
-    // Verify URL is inside the uploads directory before we hand it to JS
-    $upload_dir = wp_upload_dir();
-    $is_local = false;
-    foreach ([$upload_dir['baseurl'], str_replace('http://', 'https://', $upload_dir['baseurl']), str_replace('https://', 'http://', $upload_dir['baseurl'])] as $base) {
-        if (strpos($sheet_url, $base) === 0) { $is_local = true; break; }
-    }
-    if (!$is_local) {
-        echo '<div class="wrap"><h1>Generate PDF</h1><p>Invalid sheet URL.</p></div>';
-        return;
-    }
+
+    $s = get_option(BTDTF_OPT, btdtf_defaults());
+    $job['name']    = $name !== '' ? $name : 'gang-sheet';
+    $job['sheetW']  = floatval($s['canvas_width'] ?? 22);
+    $job['margin']  = floatval($s['margin'] ?? 0.15);
+    $job['padding'] = floatval($s['padding'] ?? 0.20);
     ?>
-    <div class="wrap" style="max-width:600px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
-        <h1 style="color:#27267e">Generating PDF&hellip;</h1>
-        <p id="btgsb-pdf-status" style="font-size:16px;line-height:1.6">&#x23F3; Loading PDF library&hellip;</p>
-        <p style="font-size:13px;color:#666;margin-top:30px;line-height:1.5">The PDF is generated in your browser from the gang sheet PNG. Once the download starts, you can close this tab.</p>
+    <div class="wrap" style="max-width:640px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
+        <h1 style="color:#27267e">Gang Sheet PDF<?php echo $name !== '' ? ' &middot; #' . esc_html($name) : ''; ?></h1>
+        <p id="btgsb-pdf-status" style="font-size:16px;line-height:1.6">&#x23F3; Loading&hellip;</p>
+        <ul id="btgsb-pdf-list" style="list-style:none;margin:10px 0 0;padding:0;font-size:15px"></ul>
+        <p style="font-size:13px;color:#666;margin-top:30px;line-height:1.5">Built in your browser from the order's production files. A PDF page tops out at 200 inches, so a longer sheet comes out as several PDFs, split between pieces and never through one. Once the downloads finish you can close this tab.</p>
     </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="<?php echo esc_url(BTDTF_URL . 'assets/pdf-export.js?ver=' . BTDTF_VERSION); ?>"></script>
     <script>
     (function(){
-        var pngUrl = '<?php echo esc_js($sheet_url); ?>';
-        var orderNo = '<?php echo esc_js($order_no); ?>';
-        var status = document.getElementById('btgsb-pdf-status');
-        function setStatus(msg) { if (status) status.innerHTML = msg; }
-
-        var s = document.createElement('script');
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-        s.onload = function() {
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                setStatus('&#x274C; jsPDF library failed to initialize.');
-                return;
-            }
-            setStatus('&#x1F5BC;&#xFE0F; Loading sheet image&hellip;');
-            var img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = function() {
-                try {
-                    setStatus('&#x1F4C4; Building PDF&hellip;');
-                    var inW = 22;
-                    var inH = (img.naturalHeight / img.naturalWidth) * inW;
-                    var pdf = new window.jspdf.jsPDF({
-                        orientation: inH > inW ? 'portrait' : 'landscape',
-                        unit: 'in',
-                        format: [inW, inH],
-                        compress: true
-                    });
-                    pdf.addImage(img, 'PNG', 0, 0, inW, inH, undefined, 'FAST');
-                    var name = orderNo ? (orderNo + '.pdf') : (pngUrl.split('/').pop() || 'gang-sheet.png').replace(/\.png(\?.*)?$/i, '.pdf');
-                    pdf.save(name);
-                    setStatus('&#x2713; PDF downloaded! You can close this tab.');
-                } catch (err) {
-                    setStatus('&#x274C; Error: ' + err.message);
-                }
-            };
-            img.onerror = function() {
-                setStatus('&#x274C; Could not load sheet image. The file may have been moved or deleted.');
-            };
-            img.src = pngUrl;
-        };
-        s.onerror = function() {
-            setStatus('&#x274C; Could not load PDF library from CDN. Check your internet connection.');
-        };
-        document.head.appendChild(s);
+        var job = <?php echo wp_json_encode($job, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        var ui  = { status: document.getElementById('btgsb-pdf-status'), list: document.getElementById('btgsb-pdf-list') };
+        if (!window.BTDTF_PDF) { ui.status.innerHTML = '&#x274C; The PDF exporter did not load. Reload this page.'; return; }
+        window.BTDTF_PDF.run(job, ui);
     })();
     </script>
     <?php
@@ -945,6 +1001,7 @@ function btdtf_register_hooks() {
         if (!empty($values['btgsb_design_files'])) $item->add_meta_data('_btgsb_design_files', $values['btgsb_design_files']);
         if (!empty($values['btgsb_zip_url']))      $item->add_meta_data('_btgsb_zip_url',      $values['btgsb_zip_url']);
         if (!empty($values['btgsb_manifest']))     $item->add_meta_data('_btgsb_manifest',     $values['btgsb_manifest']);
+        if (!empty($values['btgsb_layout']))       $item->add_meta_data('_btgsb_layout',       $values['btgsb_layout']);
         // combined flag: store '0' explicitly so we can tell "not rendered"
         // apart from "old order with no flag at all".
         $item->add_meta_data('_btgsb_combined', isset($values['btgsb_combined']) ? intval($values['btgsb_combined']) : 1);
@@ -1000,7 +1057,9 @@ function btdtf_register_hooks() {
             $u = esc_url($sheet_url);
             echo '<div style="margin-bottom:6px"><strong style="color:#27267e">Production Sheet</strong></div>';
             echo '<a href="'.$u.'" target="_blank" download="'.esc_attr($dl_base).'.png" style="font-weight:bold;margin-right:14px;text-decoration:none">&#x1F4E5; Download PNG</a>';
-            echo '<button type="button" class="btgsb-pdf-dl" data-png="'.$u.'" data-fname="'.esc_attr($dl_base).'.pdf" style="font-weight:bold;color:#c0392b;background:none;border:none;cursor:pointer;padding:0;font-family:inherit;font-size:13px;text-decoration:underline">&#x1F4C4; Download PDF</button>';
+            if (!empty($oid)) {
+                echo '<a href="'.esc_url(btdtf_pdf_page_url($oid)).'" target="_blank" rel="noopener" style="font-weight:bold;color:#c0392b;text-decoration:underline">&#x1F4C4; Download PDF</a>';
+            }
         }
         if ($design_files) {
             echo '<div style="margin-top:8px"><strong style="color:#27267e">Original Design Files</strong><br>';
@@ -1047,7 +1106,7 @@ function btdtf_register_hooks() {
         echo '<h2 style="color:#27267e;margin:24px 0 12px;font-size:18px;border-bottom:2px solid #27267e;padding-bottom:6px">&#x1F4E6; Combined Sheet</h2>';
         foreach ($entries as $e) {
             $png = esc_url($e['url']);
-            $pdf = esc_url(add_query_arg(['page' => 'btgsb-pdf-download', 'sheet' => $e['url'], 'order' => $dl_base], admin_url('admin.php')));
+            $pdf = esc_url(btdtf_pdf_page_url($order->get_id()));
             echo '<div style="background:#f0eff8;border:1px solid #d0cff0;border-radius:6px;padding:16px;margin-bottom:12px;font-family:Arial,sans-serif">';
             echo '<p style="margin:0 0 10px;font-weight:bold;color:#333">' . esc_html($e['name']) . '</p>';
             echo '<a href="' . $png . '" download="' . esc_attr($dl_base) . '.png" style="display:inline-block;margin:4px 8px 4px 0;background:#27267e;color:#fff;padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4E5; Download PNG</a>';
@@ -1065,80 +1124,6 @@ function btdtf_register_hooks() {
             'btgsb-pdf-download',
             'btdtf_render_pdf_download_page'
         );
-    });
-
-    add_action('admin_footer', function () {
-        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
-        if (!$screen) return;
-        // Show on classic shop_order edit screen AND HPOS order screen
-        $on_order_page = ($screen->post_type === 'shop_order')
-                      || ($screen->id === 'woocommerce_page_wc-orders')
-                      || (isset($_GET['page']) && $_GET['page'] === 'wc-orders');
-        if (!$on_order_page) return;
-        ?>
-        <script>
-        (function(){
-            if (window.btgsbPdfDlBound) return; window.btgsbPdfDlBound = true;
-            var jsPDFLoad = null;
-            function loadJsPDF() {
-                if (jsPDFLoad) return jsPDFLoad;
-                jsPDFLoad = new Promise(function(resolve, reject){
-                    if (window.jspdf && window.jspdf.jsPDF) { resolve(window.jspdf); return; }
-                    var s = document.createElement('script');
-                    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-                    s.onload  = function(){ window.jspdf ? resolve(window.jspdf) : reject(new Error('jsPDF loaded but namespace missing')); };
-                    s.onerror = function(){ reject(new Error('Could not load jsPDF from CDN')); };
-                    document.head.appendChild(s);
-                });
-                return jsPDFLoad;
-            }
-            document.addEventListener('click', function(e){
-                var btn = e.target.closest('.btgsb-pdf-dl');
-                if (!btn) return;
-                e.preventDefault();
-                var pngUrl = btn.getAttribute('data-png');
-                var fname  = btn.getAttribute('data-fname') || '';
-                if (!pngUrl) return;
-                var orig = btn.innerHTML;
-                btn.innerHTML = '\u23F3 Building PDF\u2026';
-                btn.disabled = true;
-                loadJsPDF().then(function(ns){
-                    var img = new Image();
-                    img.crossOrigin = 'anonymous';
-                    img.onload = function(){
-                        try {
-                            // Sheet is 22" wide by convention; height derived from aspect.
-                            var inW = 22;
-                            var inH = (img.naturalHeight / img.naturalWidth) * inW;
-                            var pdf = new ns.jsPDF({
-                                orientation: inH > inW ? 'portrait' : 'landscape',
-                                unit: 'in',
-                                format: [inW, inH],
-                                compress: true
-                            });
-                            pdf.addImage(img, 'PNG', 0, 0, inW, inH, undefined, 'FAST');
-                            var name = fname || (pngUrl.split('/').pop() || 'gang-sheet.png').replace(/\.png(\?.*)?$/i, '.pdf');
-                            pdf.save(name);
-                            btn.innerHTML = '\u2713 Downloaded';
-                            setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; }, 1800);
-                        } catch (err) {
-                            alert('Could not generate PDF: ' + err.message);
-                            btn.innerHTML = orig; btn.disabled = false;
-                        }
-                    };
-                    img.onerror = function(){
-                        alert('Could not load PNG for PDF conversion. Check that the file still exists on the server.');
-                        btn.innerHTML = orig; btn.disabled = false;
-                    };
-                    img.src = pngUrl;
-                }).catch(function(err){
-                    alert(err.message);
-                    btn.innerHTML = orig; btn.disabled = false;
-                });
-            });
-        })();
-        </script>
-        <?php
     });
 
     add_action('admin_init', function () {

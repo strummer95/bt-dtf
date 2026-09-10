@@ -1128,7 +1128,9 @@ jQuery(function($){
     var EXPORT_DPI = parseInt(S.export_dpi      || 200);
     var TIERS      = S.pricing_tiers            || [];
 
-    var NN_RENDER_DPI = 200;
+    // Generated name/number pieces render at 300 DPI, the same bar the tool
+    // sets for uploaded art. They were 200, which is what they printed at.
+    var NN_RENDER_DPI = 300;
 
     // charset is every character the embedded woff2 actually contains. Canvas
     // silently falls back to a system font for anything missing, which is how
@@ -3662,6 +3664,20 @@ jQuery(function($){
         });
     }
 
+    // Exact placements for the print PDFs. i is the design's index in
+    // designs[], which is also its row in the manifest and its file in the ZIP.
+    function buildLayout() {
+        var idx = {};
+        designs.forEach(function(d, i){ idx[d.id] = i; });
+        var r4 = function(v){ return Math.round(v * 10000) / 10000; };
+        var pl = [];
+        sheetState.placements.forEach(function(p){
+            if (idx[p.designId] === undefined) return;
+            pl.push({ i: idx[p.designId], x: r4(p.x), y: r4(p.y), w: r4(p.w), h: r4(p.h), r: p.rotated ? 1 : 0 });
+        });
+        return { w: SHEET_W, h: r4(sheetState.sheetH), p: pl };
+    }
+
     // Lightweight manifest (no image work) for the admin design list.
     function buildManifest() {
         return designs.map(function(d, i){
@@ -3711,6 +3727,7 @@ jQuery(function($){
             fd2.append('item_count',    info.totalPieces || sheetState.placements.length);
             fd2.append('combined_rendered', combined ? '1' : '0');
             fd2.append('manifest',      JSON.stringify(manifest));
+            fd2.append('layout',        JSON.stringify(buildLayout()));
             setStatus('Adding to cart\u2026', 'info');
             return fetch(BTGSB.ajax_url, { method: 'POST', body: fd2, credentials: 'same-origin' })
                 .then(function(r){ return r.json(); })

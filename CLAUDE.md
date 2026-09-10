@@ -8,7 +8,7 @@ builder nests them and prices the sheet, and the order flows into WooCommerce.
 `btgsb-settings` and every option, table and meta key still uses `btgsb`, deliberately, so
 existing orders and settings carry over.
 
-- Current version: **0.4.1**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
+- Current version: **0.7.0**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
 - Repo: `strummer95/bt-dtf`
 - Builder UI: `bt-dtf/includes/frontend.php` (~3,660 lines), shortcode `[gang_sheet_builder]`
 
@@ -72,7 +72,7 @@ and must stay.
 `includes/backend.php` orders, admin columns, pricing tiers · `includes/save.php` Save &
 Resume, the `wp_btgsb_saves` table, AJAX, nightly cron · `includes/shipping.php` the
 shipping method · `includes/admin.php` Sheet Settings and Status & Updates ·
-`includes/updater.php`
+`includes/updater.php` · `assets/pdf-export.js` the print PDF exporter (see below)
 
 There are 76 builder functions in `frontend.php`. Before a release touching it, verify they
 are each present exactly once with no unresolved internal calls. That check was run for
@@ -106,3 +106,22 @@ WooCommerce status**, so flagged orders cannot drop out of the list.
   BT Quote rather than floating above them.
 - Changelog entries in `manifest.json` are read by shop staff, not developers. Match the
   existing plain-language voice: what changed, what it means, and what actually caused it.
+
+## Print PDFs (0.7.0)
+
+`assets/pdf-export.js` builds the print PDFs in the admin's browser on the hidden page
+`admin.php?page=btgsb-pdf-download&oid=ORDER_ID` (`btdtf_render_pdf_download_page` in
+`backend.php`). Every Download PDF link, on the order screen and in the admin email, goes there.
+
+- **A PDF page tops out at 200" (14,400 pt).** jsPDF clamps a taller page and still draws the
+  art full size, which is how order 5486 lost its bottom 72". Sheets over 200" become several
+  PDFs, split between pieces and never through one.
+- **Pieces come from the production ZIP at native resolution, not the combined PNG.** The
+  combined PNG is capped by `buildCombinedSheet` at 16,384 px a side and 50 MP, so long sheets
+  export far below 300 DPI. Treat it as a preview.
+- Checkout posts `layout` (`{w, h, p:[{i,x,y,w,h,r}]}`, `i` = index into designs[] = manifest
+  row = ZIP file), stored as order item meta `_btgsb_layout`. Orders without it are repacked
+  onto rows from the manifest. Orders without a ZIP fall back to slicing the combined PNG at
+  transparent rows.
+- Pure logic (`paginate`, `packManifest`, `planFromJob`) is exported for Node, so it can be
+  tested without a browser.
