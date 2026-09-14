@@ -3438,19 +3438,21 @@ jQuery(function($){
 
     // Starting print size for an upload.
     //
+    // The rule is that the file decides. Whatever size and resolution the
+    // customer saved is what the piece opens at, because the assumption is
+    // they uploaded print-ready art that needs no resizing. 6 inches at 200
+    // DPI comes in as 6 inches at 200 DPI.
+    //
     // This used to be nW/150 for every file, which assumed all art was 150 DPI
     // and doubled the size of anything drawn at 300. A 4x5in 300 DPI PDF came
     // in at 8x10in, read back as 150 DPI, and got flagged Low DPI - so the
     // customer had to type 4 into the W box, at which point it said 300 DPI and
     // Good. The art was right the whole time; only the opening size was wrong.
     //
-    // When the file states its own resolution we use it and the piece lands at
-    // the size it was made at. The 150 guess stays for files that say nothing,
-    // and for anything claiming less than 150, where the guess gives the smaller
-    // and safer size.
+    // The 150 guess is now only for a file that states nothing at all.
     function defaultPrintSize(nW, nH, srcDpi) {
         var w, h;
-        if (srcDpi && isFinite(srcDpi) && srcDpi >= 150 && srcDpi <= 2400) {
+        if (srcDpi && isFinite(srcDpi) && srcDpi >= 1 && srcDpi <= 10000) {
             w = nW / srcDpi;
             h = nH / srcDpi;
         } else {
@@ -3500,6 +3502,86 @@ jQuery(function($){
         });
     }
 
+    // The resolution the art inside a PDF page is actually at.
+    //
+    // Walks the page's drawing operators, tracks the transform, and for every
+    // raster image works out how many pixels it has per inch of page once it is
+    // placed. A 1200px wide image placed across 432pt (6 inches) is 200 DPI, and
+    // that is what the page gets rasterized at. Rendering it at a fixed 300
+    // invents pixels that were never in the file and then reports 300 DPI on
+    // 200 DPI art, which is worse than the bug it was meant to fix.
+    //
+    // Returns 0 for a page with no raster images. Vector art has no native
+    // resolution, so there is nothing to preserve and the caller picks.
+    function pdfPageNativeDpi(page, pdfjsLib) {
+        return page.getOperatorList().then(function(ops){
+            var OPS = pdfjsLib.OPS || {};
+            var ctm = [1, 0, 0, 1, 0, 0];
+            var stack = [];
+            var best = 0;
+
+            // PDF concatenation: n is applied before m.
+            function concat(m, n) {
+                return [
+                    n[0]*m[0] + n[1]*m[2],
+                    n[0]*m[1] + n[1]*m[3],
+                    n[2]*m[0] + n[3]*m[2],
+                    n[2]*m[1] + n[3]*m[3],
+                    n[4]*m[0] + n[5]*m[2] + m[4],
+                    n[4]*m[1] + n[5]*m[3] + m[5]
+                ];
+            }
+
+            function imgSize(args) {
+                if (!args || !args.length) return null;
+                var a0 = args[0];
+                if (a0 && typeof a0 === 'object' && a0.width > 0) return [a0.width, a0.height];
+                if (typeof args[1] === 'number' && args[1] > 0 &&
+                    typeof args[2] === 'number' && args[2] > 0) return [args[1], args[2]];
+                if (typeof a0 === 'string') {
+                    try {
+                        if (page.objs && page.objs.has && page.objs.has(a0)) {
+                            var o = page.objs.get(a0);
+                            if (o && o.width > 0) return [o.width, o.height];
+                        }
+                    } catch(e){}
+                }
+                return null;
+            }
+
+            for (var i = 0; i < ops.fnArray.length; i++) {
+                var fn   = ops.fnArray[i];
+                var args = ops.argsArray[i];
+
+                if (fn === OPS.save) {
+                    stack.push(ctm.slice());
+                } else if (fn === OPS.restore) {
+                    if (stack.length) ctm = stack.pop();
+                } else if (fn === OPS.transform) {
+                    if (args && args.length >= 6) ctm = concat(ctm, args);
+                } else if (fn === OPS.paintFormXObjectBegin) {
+                    stack.push(ctm.slice());
+                    if (args && args[0] && args[0].length >= 6) ctm = concat(ctm, args[0]);
+                } else if (fn === OPS.paintFormXObjectEnd) {
+                    if (stack.length) ctm = stack.pop();
+                } else if (fn === OPS.paintImageXObject ||
+                           fn === OPS.paintInlineImageXObject ||
+                           fn === OPS.paintImageMaskXObject ||
+                           fn === OPS.paintJpegXObject) {
+                    var sz = imgSize(args);
+                    if (!sz) continue;
+                    // An image is drawn into the unit square, so the CTM columns
+                    // give its placed size in points.
+                    var placedW = Math.sqrt(ctm[0]*ctm[0] + ctm[1]*ctm[1]);
+                    var placedH = Math.sqrt(ctm[2]*ctm[2] + ctm[3]*ctm[3]);
+                    if (placedW > 0.01) best = Math.max(best, sz[0] * 72 / placedW);
+                    if (placedH > 0.01) best = Math.max(best, sz[1] * 72 / placedH);
+                }
+            }
+            return best;
+        }).catch(function(){ return 0; });
+    }
+
     function loadPdfFile(file) {
         return ensurePdfJs().then(function(pdfjsLib){
             return new Promise(function(resolve, reject){
@@ -3512,7 +3594,27 @@ jQuery(function($){
                             (function(pageNum){
                                 pageJobs.push(
                                     pdf.getPage(pageNum).then(function(page){
-                                        var targetDpi = 300;
+                                      return pdfPageNativeDpi(page, pdfjsLib).then(function(nativeDpi){
+                                        // Native resolution when the page has raster art,
+                                        // 300 when it is pure vector and has none.
+                                        var targetDpi = nativeDpi > 0
+                                            ? Math.min(1200, Math.max(36, Math.round(nativeDpi)))
+                                            : 300;
+
+                                        // Browser canvas ceilings. Going over them gives a
+                                        // blank canvas, so drop the DPI instead and let the
+                                        // piece report the resolution it really came out at.
+                                        var base = page.getViewport({ scale: 1 });
+                                        var pxW  = base.width  * targetDpi / 72;
+                                        var pxH  = base.height * targetDpi / 72;
+                                        var fit  = Math.min(
+                                            1,
+                                            16384 / pxW,
+                                            16384 / pxH,
+                                            Math.sqrt(40e6 / Math.max(1, pxW * pxH))
+                                        );
+                                        if (fit < 1) targetDpi = Math.max(36, Math.floor(targetDpi * fit));
+
                                         var viewport = page.getViewport({ scale: targetDpi / 72 });
                                         var canvas = document.createElement('canvas');
                                         canvas.width  = Math.round(viewport.width);
@@ -3524,8 +3626,6 @@ jQuery(function($){
                                             viewport: viewport,
                                             background: 'rgba(0,0,0,0)'
                                         }).promise.then(function(){
-											
-											
                                             var hasAlpha = canvasHasTransparentPixels(canvas);
                                             var dataUrl = canvas.toDataURL('image/png');
                                             return new Promise(function(res){
@@ -3533,9 +3633,10 @@ jQuery(function($){
                                                 img.onload = function(){
                                                     var baseName = file.name.replace(/\.[^.]+$/, '');
                                                     var name = pdf.numPages > 1 ? (baseName + ' p' + pageNum) : baseName;
-                                                    // The page was rasterized at exactly targetDpi against
-                                                    // the PDF's own point space, so canvas px / targetDpi is
-                                                    // the page's real size in inches. No guessing needed.
+                                                    // Rasterized at targetDpi against the PDF's own
+                                                    // point space, so canvas px / targetDpi is the
+                                                    // page's real size in inches, and targetDpi is
+                                                    // the resolution the art really is.
                                                     addDesignFromImage(name, dataUrl, img, hasAlpha, targetDpi);
                                                     res();
                                                 };
@@ -3543,6 +3644,7 @@ jQuery(function($){
                                                 img.src = dataUrl;
                                             });
                                         });
+                                      });
                                     })
                                 );
                             })(pn);
