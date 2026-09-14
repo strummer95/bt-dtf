@@ -3401,37 +3401,102 @@ jQuery(function($){
     }
 
     /* -- Load a single file (PNG or PDF) ------------------------- */
-    function addDesignFromImage(name, dataUrl, img, hasAlpha) {
+
+    // Read the resolution a PNG declares in its pHYs chunk. Returns 0 when the
+    // chunk is absent or is not stated in metres. pHYs always sits ahead of the
+    // image data, so the first 64KB is enough and the file itself is untouched.
+    function readPngPhysDpi(file) {
+        return new Promise(function(resolve){
+            try {
+                var reader = new FileReader();
+                reader.onload = function(){
+                    try {
+                        var b = new Uint8Array(reader.result);
+                        if (b.length < 16 || b[0] !== 0x89 || b[1] !== 0x50) { resolve(0); return; }
+                        var p = 8;
+                        while (p + 12 <= b.length) {
+                            var len  = ((b[p]<<24) | (b[p+1]<<16) | (b[p+2]<<8) | b[p+3]) >>> 0;
+                            var type = String.fromCharCode(b[p+4], b[p+5], b[p+6], b[p+7]);
+                            if (type === 'pHYs') {
+                                if (p + 17 > b.length) { resolve(0); return; }
+                                var ppuX = ((b[p+8]<<24) | (b[p+9]<<16) | (b[p+10]<<8) | b[p+11]) >>> 0;
+                                var unit = b[p+16];
+                                resolve(unit === 1 ? Math.round(ppuX * 0.0254) : 0);
+                                return;
+                            }
+                            if (type === 'IDAT' || type === 'IEND') break;
+                            p += 12 + len;
+                        }
+                        resolve(0);
+                    } catch(e) { resolve(0); }
+                };
+                reader.onerror = function(){ resolve(0); };
+                reader.readAsArrayBuffer(file.slice(0, 65536));
+            } catch(e) { resolve(0); }
+        });
+    }
+
+    // Starting print size for an upload.
+    //
+    // This used to be nW/150 for every file, which assumed all art was 150 DPI
+    // and doubled the size of anything drawn at 300. A 4x5in 300 DPI PDF came
+    // in at 8x10in, read back as 150 DPI, and got flagged Low DPI - so the
+    // customer had to type 4 into the W box, at which point it said 300 DPI and
+    // Good. The art was right the whole time; only the opening size was wrong.
+    //
+    // When the file states its own resolution we use it and the piece lands at
+    // the size it was made at. The 150 guess stays for files that say nothing,
+    // and for anything claiming less than 150, where the guess gives the smaller
+    // and safer size.
+    function defaultPrintSize(nW, nH, srcDpi) {
+        var w, h;
+        if (srcDpi && isFinite(srcDpi) && srcDpi >= 150 && srcDpi <= 2400) {
+            w = nW / srcDpi;
+            h = nH / srcDpi;
+        } else {
+            w = Math.min(SHEET_W, Math.max(3, Math.min(11, nW / 150)));
+            h = w * (nH / nW);
+        }
+        // Never scale up from here. Only shrink, and only to fit the sheet.
+        var fit = Math.min(1, SHEET_W / w, MAX_H / h);
+        if (fit < 1) { w *= fit; h *= fit; }
+        return {
+            w: Math.max(0.1, parseFloat(w.toFixed(2))),
+            h: Math.max(0.1, parseFloat(h.toFixed(2)))
+        };
+    }
+
+    function addDesignFromImage(name, dataUrl, img, hasAlpha, srcDpi) {
         var did = nextId++;
         var nW = img.naturalWidth;
         var nH = img.naturalHeight;
-        // Default print size: fit width to a sensible default, capped to sheet width
-        var defaultW = Math.min(SHEET_W, Math.max(3, Math.min(11, nW / 150)));
-        var heightIn = parseFloat((defaultW * (nH / nW)).toFixed(2));
+        var size = defaultPrintSize(nW, nH, srcDpi);
         designs.push({
             id: did, name: name, dataUrl: dataUrl, imgEl: img,
             nW: nW, nH: nH,
-            widthIn: parseFloat(defaultW.toFixed(2)), heightIn: heightIn,
+            widthIn: size.w, heightIn: size.h,
             qty: 1, locked: true, rotated: false, rotLock: false,
             hasAlpha: hasAlpha, batchId: null
         });
     }
 
     function loadPngFile(file) {
-        return new Promise(function(resolve, reject){
-            var reader = new FileReader();
-            reader.onload = function(){
-                var img = new Image();
-                img.onload = function(){
-                    var hasAlpha = imageHasTransparency(img);
-                    addDesignFromImage(file.name.replace(/\.[^.]+$/, ''), reader.result, img, hasAlpha);
-                    resolve();
+        return readPngPhysDpi(file).then(function(srcDpi){
+            return new Promise(function(resolve, reject){
+                var reader = new FileReader();
+                reader.onload = function(){
+                    var img = new Image();
+                    img.onload = function(){
+                        var hasAlpha = imageHasTransparency(img);
+                        addDesignFromImage(file.name.replace(/\.[^.]+$/, ''), reader.result, img, hasAlpha, srcDpi);
+                        resolve();
+                    };
+                    img.onerror = function(){ reject(new Error('Could not read ' + file.name)); };
+                    img.src = reader.result;
                 };
-                img.onerror = function(){ reject(new Error('Could not read ' + file.name)); };
-                img.src = reader.result;
-            };
-            reader.onerror = function(){ reject(new Error('Could not read ' + file.name)); };
-            reader.readAsDataURL(file);
+                reader.onerror = function(){ reject(new Error('Could not read ' + file.name)); };
+                reader.readAsDataURL(file);
+            });
         });
     }
 
@@ -3468,7 +3533,10 @@ jQuery(function($){
                                                 img.onload = function(){
                                                     var baseName = file.name.replace(/\.[^.]+$/, '');
                                                     var name = pdf.numPages > 1 ? (baseName + ' p' + pageNum) : baseName;
-                                                    addDesignFromImage(name, dataUrl, img, hasAlpha);
+                                                    // The page was rasterized at exactly targetDpi against
+                                                    // the PDF's own point space, so canvas px / targetDpi is
+                                                    // the page's real size in inches. No guessing needed.
+                                                    addDesignFromImage(name, dataUrl, img, hasAlpha, targetDpi);
                                                     res();
                                                 };
                                                 img.onerror = function(){ res(); };
