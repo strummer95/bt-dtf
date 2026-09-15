@@ -353,7 +353,7 @@
             return;
         }
 
-        work.then(function (res) {
+        return work.then(function (res) {
             var names = fileNames(job.name, res.docs.length), html = '', links = [];
             res.docs.forEach(function (d, i) {
                 var blob = d.pdf.output('blob'), url = URL.createObjectURL(blob);

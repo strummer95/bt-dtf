@@ -291,7 +291,7 @@ function btdtf_production_files_html($order, $context) {
             $out .= '<a href="'.esc_url($zip_url).'" download="'.esc_attr($zip_name).'" '
                   . 'style="font-weight:bold;text-decoration:none">Download Individual Files (ZIP)</a>';
             if ($pdf_link) {
-                $out .= ' &nbsp; <a href="'.esc_url($pdf_link).'" target="_blank" rel="noopener" style="font-weight:bold;color:#c0392b;text-decoration:underline">&#x1F4C4; Download PDF</a>';
+                $out .= ' &nbsp; ' . btdtf_pdf_inline_link($order);
             }
         }
     }
@@ -552,6 +552,39 @@ function btdtf_pdf_page_url($order_id) {
     return add_query_arg(['page' => 'btgsb-pdf-download', 'oid' => (int) $order_id], admin_url('admin.php'));
 }
 
+// What the browser exporter needs for one order, with only uploads URLs
+// kept. Null when there is nothing to build from.
+function btdtf_pdf_job_payload($order, $fallback_sheet = '', $fallback_name = '') {
+    if ($order) {
+        $job  = btdtf_pdf_job_for_order($order);
+        $name = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $order->get_order_number());
+    } else {
+        $job  = ['zip' => '', 'manifest' => [], 'layout' => null, 'sheet' => $fallback_sheet];
+        $name = $fallback_name;
+    }
+    if (!btdtf_is_upload_url($job['zip']))   $job['zip']   = '';
+    if (!btdtf_is_upload_url($job['sheet'])) $job['sheet'] = '';
+    if (!$job['manifest']) $job['zip'] = '';
+    if (!$job['zip'] && !$job['sheet']) return null;
+
+    $s = get_option(BTDTF_OPT, btdtf_defaults());
+    $job['name']    = $name !== '' ? $name : 'gang-sheet';
+    $job['sheetW']  = floatval($s['canvas_width'] ?? 22);
+    $job['margin']  = floatval($s['margin'] ?? 0.15);
+    $job['padding'] = floatval($s['padding'] ?? 0.20);
+    return $job;
+}
+
+// Order screen Download PDF: builds and downloads right there. The href is
+// only a fallback to the PDF page if the script never loaded.
+function btdtf_pdf_inline_link($order) {
+    $job = btdtf_pdf_job_payload($order);
+    if (!$job) return '';
+    return '<a href="' . esc_url(btdtf_pdf_page_url($order->get_id())) . '" class="btdtf-pdf-inline" '
+         . 'data-job="' . esc_attr(wp_json_encode($job)) . '" '
+         . 'style="font-weight:bold;color:#c0392b;text-decoration:underline">&#x1F4C4; Download PDF</a>';
+}
+
 function btdtf_render_pdf_download_page() {
     if (!current_user_can('manage_woocommerce')) wp_die('Unauthorized');
     $oid       = isset($_GET['oid'])   ? absint($_GET['oid']) : 0;
@@ -571,28 +604,13 @@ function btdtf_render_pdf_download_page() {
         }
     }
 
-    if ($order) {
-        $job  = btdtf_pdf_job_for_order($order);
-        $name = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $order->get_order_number());
-    } else {
-        $job  = ['zip' => '', 'manifest' => [], 'layout' => null, 'sheet' => $sheet_url];
-        $name = $order_no;
-    }
     // Only URLs inside uploads are handed to the browser.
-    if (!btdtf_is_upload_url($job['zip']))   $job['zip']   = '';
-    if (!btdtf_is_upload_url($job['sheet'])) $job['sheet'] = '';
-    if (!$job['manifest']) $job['zip'] = '';
-
-    if (!$job['zip'] && !$job['sheet']) {
+    $job = btdtf_pdf_job_payload($order, $sheet_url, $order_no);
+    if (!$job) {
         echo '<div class="wrap"><h1>Generate PDF</h1><p>No production files found for this order.</p></div>';
         return;
     }
-
-    $s = get_option(BTDTF_OPT, btdtf_defaults());
-    $job['name']    = $name !== '' ? $name : 'gang-sheet';
-    $job['sheetW']  = floatval($s['canvas_width'] ?? 22);
-    $job['margin']  = floatval($s['margin'] ?? 0.15);
-    $job['padding'] = floatval($s['padding'] ?? 0.20);
+    $name = $order ? preg_replace('/[^A-Za-z0-9_-]/', '', (string) $order->get_order_number()) : $order_no;
     ?>
     <div class="wrap" style="max-width:640px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">
         <h1 style="color:#27267e">Gang Sheet PDF<?php echo $name !== '' ? ' &middot; #' . esc_html($name) : ''; ?></h1>
@@ -1057,8 +1075,8 @@ function btdtf_register_hooks() {
             $u = esc_url($sheet_url);
             echo '<div style="margin-bottom:6px"><strong style="color:#27267e">Production Sheet</strong></div>';
             echo '<a href="'.$u.'" target="_blank" download="'.esc_attr($dl_base).'.png" style="font-weight:bold;margin-right:14px;text-decoration:none">&#x1F4E5; Download PNG</a>';
-            if (!empty($oid)) {
-                echo '<a href="'.esc_url(btdtf_pdf_page_url($oid)).'" target="_blank" rel="noopener" style="font-weight:bold;color:#c0392b;text-decoration:underline">&#x1F4C4; Download PDF</a>';
+            if (!empty($oid) && !empty($ord)) {
+                echo btdtf_pdf_inline_link($ord);
             }
         }
         if ($design_files) {
@@ -1114,6 +1132,69 @@ function btdtf_register_hooks() {
             echo '</div>';
         }
     }, 10, 4);
+
+    add_action('admin_footer', function () {
+        if (!current_user_can('manage_woocommerce')) return;
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        $on_order_page = ($screen && ($screen->post_type === 'shop_order' || $screen->id === 'woocommerce_page_wc-orders'))
+                      || (isset($_GET['page']) && $_GET['page'] === 'wc-orders');
+        if (!$on_order_page) return;
+        $libs = [
+            'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+            'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+            BTDTF_URL . 'assets/pdf-export.js?ver=' . BTDTF_VERSION,
+        ];
+        ?>
+        <script>
+        (function(){
+            if (window.btdtfPdfInlineBound) return; window.btdtfPdfInlineBound = true;
+            var libs = <?php echo wp_json_encode(array_map('esc_url_raw', $libs)); ?>, loading = null;
+            function loadLibs() {
+                if (loading) return loading;
+                loading = Promise.all(libs.map(function (src) {
+                    return new Promise(function (resolve, reject) {
+                        var s = document.createElement('script');
+                        s.src = src;
+                        s.onload = resolve;
+                        s.onerror = function () { reject(new Error('Could not load ' + src.split('/').pop().split('?')[0])); };
+                        document.head.appendChild(s);
+                    });
+                }));
+                loading.catch(function () { loading = null; });
+                return loading;
+            }
+            document.addEventListener('click', function (e) {
+                var a = e.target.closest('a.btdtf-pdf-inline');
+                if (!a) return;
+                var job;
+                try { job = JSON.parse(a.getAttribute('data-job') || ''); } catch (err) { return; } // fall back to the page
+                e.preventDefault();
+                if (a.getAttribute('data-busy')) return;
+                a.setAttribute('data-busy', '1');
+                var box = a.btdtfBox;
+                if (!box) {
+                    box = document.createElement('div');
+                    box.style.cssText = 'margin-top:8px;font-size:13px;line-height:1.5';
+                    box.innerHTML = '<div></div><ul style="list-style:none;margin:4px 0 0;padding:0"></ul>';
+                    a.parentNode.insertBefore(box, a.nextSibling);
+                    a.btdtfBox = box;
+                }
+                var ui = { status: box.firstChild, list: box.lastChild };
+                ui.list.innerHTML = '';
+                ui.status.innerHTML = '&#x23F3; Loading&hellip;';
+                function done() { a.removeAttribute('data-busy'); }
+                loadLibs().then(function () {
+                    if (!window.BTDTF_PDF) throw new Error('The PDF exporter did not load. Reload this page.');
+                    return window.BTDTF_PDF.run(job, ui);
+                }).then(done, function (err) {
+                    ui.status.innerHTML = '&#x274C; ' + String(err && err.message ? err.message : err).replace(/</g, '&lt;');
+                    done();
+                });
+            });
+        })();
+        </script>
+        <?php
+    });
 
     add_action('admin_menu', function () {
         add_submenu_page(
