@@ -724,6 +724,140 @@ function btdtf_await_view_link($views) {
 // Apply the filter — HPOS
 // Apply the filter — classic
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ORDER TYPE — telling a DTF Studio order from an exchange at a glance
+   ═══════════════════════════════════════════════════════════════════════
+   The Orders list shows order number, customer, date, status, total and
+   origin, and on this site a gang sheet order and an exchange-form order
+   look identical in every one of them. This adds a Type column with a
+   badge, and a filter link at the top of the list for each kind.
+
+   A DTF Studio order is known by the gang sheet meta on its line items. An
+   exchange order is known by the meta the [bt_exchange_form] WPCode snippet
+   writes on the order itself; that snippet is not part of this plugin, so
+   those keys are only ever read here, never written.
+
+   The line-item scan is cached on the order, because the Orders list would
+   otherwise re-read every order's items on every page load. The exchange
+   keys are on the order and free to read, so they are checked live every
+   time and win over the cache: the snippet writes them after the order is
+   created, and a cached "not an exchange" would otherwise stick forever.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+define('BTDTF_KIND_META', '_btgsb_order_kind');
+
+// Line item meta that marks a gang sheet. Current keys first, then the
+// public keys orders carried before the production URLs were made hidden.
+function btdtf_kind_item_keys() {
+    return ['_btgsb_sheet_url', '_btgsb_zip_url', '_btgsb_manifest', '_btgsb_layout',
+            'Sheet File', 'Sheet Size', 'Design Files'];
+}
+
+function btdtf_kind_is_exchange($order) {
+    return (bool) ($order->get_meta('_bt_exchange_items') || $order->get_meta('_bt_original_order'));
+}
+
+// 'dtf', 'exchange', or '' for an ordinary shop order.
+function btdtf_order_kind($order) {
+    if (!is_object($order)) $order = function_exists('wc_get_order') ? wc_get_order($order) : null;
+    if (!$order || !method_exists($order, 'get_meta')) return '';
+
+    $is_exchange = btdtf_kind_is_exchange($order);
+    $cached      = (string) $order->get_meta(BTDTF_KIND_META);
+
+    if ($cached === '') {
+        $kind = '';
+        if ($is_exchange) {
+            $kind = 'exchange';
+        } else {
+            foreach ($order->get_items() as $item) {
+                if (!is_object($item) || !method_exists($item, 'get_meta')) continue;
+                foreach (btdtf_kind_item_keys() as $k) {
+                    if ($item->get_meta($k)) { $kind = 'dtf'; break 2; }
+                }
+            }
+        }
+        // Meta only. A full save() would run the order through every
+        // WooCommerce save hook; reading a list must never move a status
+        // or send a customer an email.
+        $order->update_meta_data(BTDTF_KIND_META, $kind === '' ? 'none' : $kind);
+        $order->save_meta_data();
+        return $kind;
+    }
+
+    if ($is_exchange) return 'exchange';
+    return $cached === 'none' ? '' : $cached;
+}
+
+function btdtf_kind_badge($order) {
+    $kind = btdtf_order_kind($order);
+    $base = 'display:inline-block;color:#fff;padding:3px 9px;border-radius:3px;'
+          . 'font-size:13px;font-weight:700;white-space:nowrap;line-height:1.35';
+    if ($kind === 'dtf')
+        return '<span style="' . $base . ';background:#27267e" title="Placed through DTF Studio">DTF STUDIO</span>';
+    if ($kind === 'exchange')
+        return '<span style="' . $base . ';background:#e535ab" title="Placed through the exchange form">EXCHANGE</span>';
+    return '<span style="color:#bbb">&mdash;</span>';
+}
+
+/* ── Backfill ────────────────────────────────────────────────────────────
+   Every order placed before this update has no kind recorded, and the
+   filter counts below read the recorded value. Walk the unstamped orders
+   200 at a time on admin page loads until there are none left, then stop
+   for good. Without this the counts would only ever include orders
+   somebody had happened to scroll past. */
+define('BTDTF_KIND_BACKFILL_OPT', 'btgsb_kind_backfill_v1');
+
+function btdtf_kind_backfill() {
+    if (get_option(BTDTF_KIND_BACKFILL_OPT)) return;
+    if (!function_exists('wc_get_orders')) return;
+
+    $ids = wc_get_orders([
+        'limit'      => 200,
+        'status'     => 'any',
+        'return'     => 'ids',
+        'orderby'    => 'ID',
+        'order'      => 'DESC',
+        'meta_query' => [['key' => BTDTF_KIND_META, 'compare' => 'NOT EXISTS']],
+    ]);
+
+    if (!is_array($ids) || !$ids) { update_option(BTDTF_KIND_BACKFILL_OPT, '1'); return; }
+    foreach ($ids as $id) btdtf_order_kind($id);
+}
+
+/* ── Filter links at the top of the Orders list ──────────────────────── */
+function btdtf_kind_count($kind) {
+    global $wpdb;
+    $hpos = $wpdb->prefix . 'wc_orders_meta';
+    $is_h = ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $hpos)) === $hpos);
+    $tbl  = $is_h ? $hpos : $wpdb->postmeta;
+    $idc  = $is_h ? 'order_id' : 'post_id';
+
+    if ($kind === 'exchange') {
+        // Counted from the snippet's own keys, not the cache, for the same
+        // reason btdtf_order_kind checks them live.
+        return (int) $wpdb->get_var(
+            "SELECT COUNT(DISTINCT $idc) FROM $tbl
+              WHERE meta_key IN ('_bt_exchange_items', '_bt_original_order')
+                AND meta_value <> ''");
+    }
+    return (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(DISTINCT $idc) FROM $tbl WHERE meta_key=%s AND meta_value='dtf'",
+        BTDTF_KIND_META));
+}
+
+function btdtf_kind_view_links($views) {
+    foreach (['dtf' => 'DTF Studio', 'exchange' => 'Exchanges'] as $kind => $label) {
+        $n = btdtf_kind_count($kind);
+        if (!$n) continue;
+        $active = (($_GET['btgsb_kind'] ?? '') === $kind);
+        $url    = add_query_arg('btgsb_kind', $kind, admin_url('admin.php?page=wc-orders'));
+        $views['btgsb_kind_' . $kind] = '<a href="' . esc_url($url) . '"' . ($active ? ' class="current"' : '') . '>'
+            . esc_html($label) . ' <span class="count">(' . $n . ')</span></a>';
+    }
+    return $views;
+}
+
 /* ── Branded HTML email shell ─────────────────────────────────────────
    NOTE: the four custom WooCommerce order statuses (Art Approved, Printing,
    Ready for Pickup, Shipped) and their two customer notification emails were
@@ -1221,28 +1355,34 @@ function btdtf_register_hooks() {
         $new = [];
         foreach ($cols as $k => $v) {
             $new[$k] = $v;
+            if ($k === 'order_number') $new['btgsb_kind']  = 'Type';
             if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
         }
+        if (!isset($new['btgsb_kind']))  $new['btgsb_kind']  = 'Type';
         if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
         return $new;
     });
 
     add_action('woocommerce_shop_order_list_table_custom_column', function ($col, $order) {
         if ($col === 'btgsb_await') echo btdtf_await_badge($order->get_id());
+        if ($col === 'btgsb_kind')  echo btdtf_kind_badge($order);
     }, 10, 2);
 
     add_filter('manage_edit-shop_order_columns', function ($cols) {
         $new = [];
         foreach ($cols as $k => $v) {
             $new[$k] = $v;
+            if ($k === 'order_number') $new['btgsb_kind']  = 'Type';
             if ($k === 'order_status') $new['btgsb_await'] = 'Awaiting';
         }
+        if (!isset($new['btgsb_kind']))  $new['btgsb_kind']  = 'Type';
         if (!isset($new['btgsb_await'])) $new['btgsb_await'] = 'Awaiting';
         return $new;
     });
 
     add_action('manage_shop_order_posts_custom_column', function ($col, $post_id) {
         if ($col === 'btgsb_await') echo btdtf_await_badge($post_id);
+        if ($col === 'btgsb_kind')  echo btdtf_kind_badge($post_id);
     }, 10, 2);
 
     add_filter('bulk_actions-woocommerce_page_wc-orders', 'btdtf_await_bulk_actions');
@@ -1263,6 +1403,15 @@ function btdtf_register_hooks() {
 
     add_filter('views_edit-shop_order',            'btdtf_await_view_link');
 
+    add_filter('views_woocommerce_page_wc-orders', 'btdtf_kind_view_links');
+
+    add_filter('views_edit-shop_order',            'btdtf_kind_view_links');
+
+    // Stamp the order type on orders placed before this update, in batches,
+    // so the two filter links above count every order and not just the ones
+    // somebody has looked at.
+    add_action('admin_init', 'btdtf_kind_backfill');
+
     add_filter('woocommerce_order_list_table_prepare_items_query_args', function ($args) {
         if (empty($_GET['btgsb_awaiting'])) return $args;
         $args['meta_query'][] = ['key' => BTDTF_AWAIT_META, 'value' => 'yes'];
@@ -1274,6 +1423,32 @@ function btdtf_register_hooks() {
         if (($vars['post_type'] ?? '') !== 'shop_order') return $vars;
         $vars['meta_key']   = BTDTF_AWAIT_META;
         $vars['meta_value'] = 'yes';
+        return $vars;
+    });
+
+    // Type filter — HPOS. Exchanges are matched on the snippet's own key
+    // rather than the cached type, to stay true to btdtf_order_kind.
+    add_filter('woocommerce_order_list_table_prepare_items_query_args', function ($args) {
+        $kind = $_GET['btgsb_kind'] ?? '';
+        if ($kind === 'dtf') {
+            $args['meta_query'][] = ['key' => BTDTF_KIND_META, 'value' => 'dtf'];
+        } elseif ($kind === 'exchange') {
+            $args['meta_query'][] = ['key' => '_bt_original_order', 'compare' => 'EXISTS'];
+        }
+        return $args;
+    });
+
+    // Type filter — classic
+    add_filter('request', function ($vars) {
+        $kind = $_GET['btgsb_kind'] ?? '';
+        if ($kind === '') return $vars;
+        if (($vars['post_type'] ?? '') !== 'shop_order') return $vars;
+        if ($kind === 'dtf') {
+            $vars['meta_key']   = BTDTF_KIND_META;
+            $vars['meta_value'] = 'dtf';
+        } elseif ($kind === 'exchange') {
+            $vars['meta_key'] = '_bt_original_order';
+        }
         return $vars;
     });
 }

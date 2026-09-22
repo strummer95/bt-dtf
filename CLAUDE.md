@@ -51,8 +51,8 @@ Four places must match or WordPress loops forever trying to reinstall:
 3. `version` in `manifest.json`
 4. The version inside the zip
 
-Steps: edit under `bt-dtf/`, bump both version spots, `node --check` touched JS (no PHP
-binary in the container, brace-audit by hand), build `bt-dtf-X.Y.Z.zip` plus plain
+Steps: edit under `bt-dtf/`, bump both version spots, `node --check` touched JS and `php -l`
+touched PHP (the container does now carry PHP 8.4), build `bt-dtf-X.Y.Z.zip` plus plain
 `bt-dtf.zip` at the repo root, update `manifest.json` with the version, the **versioned**
 raw `download_url` and a changelog entry, commit and push to `main`. Dillon then does
 **BT Transfers → Status & Updates → Check for updates now**, then **Plugins → Update Now**.
@@ -146,3 +146,23 @@ WooCommerce status**, so flagged orders cannot drop out of the list.
   transparent rows.
 - Pure logic (`paginate`, `packManifest`, `planFromJob`) is exported for Node, so it can be
   tested without a browser.
+
+## Order type on the Orders list (0.7.4)
+
+A gang sheet order and an exchange-form order were indistinguishable in the Woo orders list:
+order number, customer, date, status, total, origin, all identical. `btdtf_order_kind()` in
+`backend.php` labels each row, with a Type column and a filter link per kind beside the
+existing Awaiting ones.
+
+- DTF is read from the gang sheet meta on the line items. **Exchange is read from
+  `_bt_exchange_items` / `_bt_original_order`, which the `[bt_exchange_form]` WPCode snippet
+  writes.** That snippet is in no repo; those keys are read here, never written.
+- The line-item scan is cached in `_btgsb_order_kind` (the Orders list would otherwise
+  re-read every order's items on every load) using `save_meta_data()`, never `save()` —
+  rendering a list must not move a status or send mail.
+- **The exchange keys are checked live and beat the cache.** The snippet writes them after
+  the order exists, so a cached "none" would otherwise stick forever. The exchange filter
+  and count read those keys too, for the same reason.
+- `btdtf_kind_backfill()` stamps pre-0.7.4 orders 200 at a time on admin loads, gated by
+  `btgsb_kind_backfill_v1`, so the DTF filter count is not limited to orders somebody
+  happened to scroll past.
