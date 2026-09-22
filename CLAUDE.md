@@ -8,7 +8,7 @@ builder nests them and prices the sheet, and the order flows into WooCommerce.
 `btgsb-settings` and every option, table and meta key still uses `btgsb`, deliberately, so
 existing orders and settings carry over.
 
-- Current version: **0.7.3**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
+- Current version: **0.7.5**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
 - Repo: `strummer95/bt-dtf`
 - Builder UI: `bt-dtf/includes/frontend.php` (~3,660 lines), shortcode `[gang_sheet_builder]`
 
@@ -55,14 +55,22 @@ Steps: edit under `bt-dtf/`, bump both version spots, `node --check` touched JS 
 touched PHP (the container does now carry PHP 8.4), build `bt-dtf-X.Y.Z.zip` plus plain
 `bt-dtf.zip` at the repo root, update `manifest.json` with the version, the **versioned**
 raw `download_url` and a changelog entry, commit and push to `main`. Dillon then does
-**BT Transfers → Status & Updates → Check for updates now**, then **Plugins → Update Now**.
+**BT Transfers → Check for updates** (the panel at the bottom of the BT Transfers page),
+then **Plugins → Update Now**.
 
 `uploads.github.com` is blocked from the container, which is why releases use versioned raw
 zips rather than GitHub Release assets. The updater reads `manifest.json` through
 `api.github.com` with `Accept: application/vnd.github.raw`, so a push is live instantly.
 
-Note this repo does **not** carry `includes/bt-admin.php`, the shared Updates panel used by
-bt-portal, bt-catalog, bt-quote and bt-accounts. It has its own Status & Updates page.
+As of 0.7.5 this repo **does** carry `includes/bt-admin.php`, the shared Updates panel, and
+it is byte-identical to the copies in bt-portal, bt-catalog, bt-quote and bt-accounts. Don't
+fork it; if it changes, re-copy it into all **five** in the same release round.
+
+**Where the update check lives is a fixed rule across the BT plugins:** the shared panel
+is the last thing on the plugin's own top-level admin page, under whatever status that
+plugin shows. Never a separate Updates submenu. BT Transfers was the one exception until
+0.7.5 (a `Status & Updates` submenu) and it is not coming back; `page=bt-transfers-status`
+redirects to the settings page for old bookmarks.
 
 ## This plugin is a port, and the port rules still apply
 
@@ -92,7 +100,7 @@ and must stay.
 `[gang_sheet_builder]` shortcode, embedded fonts, nesting and pricing logic ·
 `includes/backend.php` orders, admin columns, pricing tiers · `includes/save.php` Save &
 Resume, the `wp_btgsb_saves` table, AJAX, nightly cron · `includes/shipping.php` the
-shipping method · `includes/admin.php` Sheet Settings and Status & Updates ·
+shipping method · `includes/admin.php` the Status, Modules and Updates sections ·
 `includes/updater.php` · `assets/pdf-export.js` the print PDF exporter (see below)
 
 There are 76 builder functions in `frontend.php`. Before a release touching it, verify they

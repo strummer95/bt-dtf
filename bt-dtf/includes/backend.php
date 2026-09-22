@@ -166,7 +166,13 @@ function btdtf_settings_page() {
     </table>
     <button type="button" class="button" id="btgsb-add-tier">＋ Add Tier</button>
     <p class="submit"><input type="submit" name="btgsb_save" class="button-primary" value="Save Settings"></p>
-    </form></div>
+    </form>
+    <?php
+    // Status, Modules and the shared BT Updates panel — always last on the
+    // plugin's own page, the same place as every other BT plugin.
+    if (function_exists('btdtf_admin_status_sections')) btdtf_admin_status_sections();
+    ?>
+    </div>
     <script>
     jQuery(function($){
         $('#btgsb-add-tier').on('click',function(){

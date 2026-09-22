@@ -1,41 +1,39 @@
 <?php
 /**
- * BT Transfers — admin status page (status + update check).
- * Same pattern as BT Portal / BT Catalog / BT Quote.
+ * BT Transfers — status + updates sections.
  *
- * This is a submenu under the existing BT Transfers menu (slug btgsb-settings),
- * so the Sheet Builder Settings page stays exactly where it was.
+ * These render at the BOTTOM OF THE PLUGIN'S OWN TOP-LEVEL PAGE, which is where
+ * every BT plugin keeps them: BT Portal, BT Catalog, BT Quote and BT Accounts
+ * all end their main admin page with Status, then the shared Updates panel.
+ * BT Transfers used to hide the same thing behind a "Status & Updates" submenu,
+ * which meant the update check was in a different place here than everywhere
+ * else for no reason. There is no submenu now — 0.7.5.
+ *
+ * The Updates block itself is bt_admin_updates_panel() from includes/bt-admin.php,
+ * the shared BT Admin Kit, so the wording and the button match the other four.
+ * Anything plugin-specific goes ABOVE that panel, which is what the Status and
+ * Modules tables below are.
  */
 if (!defined('ABSPATH')) exit;
 
-add_action('admin_menu', function () {
-    // Rename the auto-created first submenu item from "BT Transfers" to
-    // "Sheet Settings" so the group reads cleanly.
-    global $submenu;
-    if (isset($submenu['btgsb-settings'][0][0])) $submenu['btgsb-settings'][0][0] = 'Sheet Settings';
+/**
+ * Old bookmarks to admin.php?page=bt-transfers-status land on the settings page,
+ * which is where this content lives now.
+ */
+add_action('admin_init', function () {
+    if (!is_admin()) return;
+    if (!isset($_GET['page']) || $_GET['page'] !== 'bt-transfers-status') return;
+    if (!current_user_can('manage_options')) return;
+    wp_safe_redirect(admin_url('admin.php?page=btgsb-settings'));
+    exit;
+});
 
-    add_submenu_page(
-        'btgsb-settings',
-        'Status & Updates',
-        'Status & Updates',
-        'manage_options',
-        'bt-transfers-status',
-        'btdtf_admin_status_page'
-    );
-}, 20);
-
-function btdtf_admin_status_page() {
-    if (isset($_POST['btdtf_check_update']) && check_admin_referer('btdtf_check_update')) {
-        delete_transient('btdtf_manifest');
-        delete_site_transient('update_plugins');
-        wp_update_plugins();
-        echo '<div class="notice notice-success"><p>Update check complete. '
-           . '<a href="' . esc_url(admin_url('plugins.php')) . '">Go to the Plugins page</a> if an update is available.</p></div>';
-    }
-
-    $manifest = function_exists('btdtf_update_manifest') ? btdtf_update_manifest() : null;
-    $latest   = ($manifest && !empty($manifest['version'])) ? $manifest['version'] : '—';
-    $behind   = ($latest !== '—' && version_compare($latest, BTDTF_VERSION, '>'));
+/**
+ * Status, Modules and the shared Updates panel.
+ * Called from the end of btdtf_settings_page() in backend.php.
+ */
+function btdtf_admin_status_sections() {
+    if (!current_user_can('manage_options')) return;
 
     // Which modules are live vs standing by behind a still-active snippet.
     $modules = array(
@@ -54,51 +52,47 @@ function btdtf_admin_status_page() {
     $saves = ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $saves_table)) === $saves_table)
         ? (int) $wpdb->get_var("SELECT COUNT(*) FROM $saves_table") : 0;
     ?>
-    <div class="wrap">
-      <h1>BT Transfers</h1>
+    <hr style="margin:28px 0">
 
-      <table class="widefat striped" style="max-width:680px;margin-top:12px;">
-        <tbody>
-          <tr><td><strong>Installed version</strong></td><td><?php echo esc_html(BTDTF_VERSION); ?></td></tr>
-          <tr><td><strong>Latest version</strong></td>
-              <td><?php echo esc_html($latest); ?>
-              <?php if ($behind): ?>
-                <span style="color:#b8860b;font-weight:700"> &mdash; update available</span>
-              <?php elseif ($latest !== '—'): ?>
-                <span style="color:#2E7D32;font-weight:700"> &mdash; up to date</span>
-              <?php endif; ?></td></tr>
-          <tr><td><strong>Checkout product</strong></td>
-              <td><?php echo $product_id
-                    ? esc_html(get_the_title($product_id)) . ' (ID ' . $product_id . ')'
-                    : '<em>not set</em>'; ?></td></tr>
-          <tr><td><strong>Pricing tiers</strong></td><td><?php echo esc_html($tiers); ?></td></tr>
-          <tr><td><strong>Saved sheets</strong></td><td><?php echo esc_html($saves); ?></td></tr>
-          <tr><td><strong>Builder shortcode</strong></td><td><code>[gang_sheet_builder]</code></td></tr>
-        </tbody>
-      </table>
+    <h2>Status</h2>
+    <table class="widefat striped" style="max-width:680px;margin-top:12px;">
+      <tbody>
+        <tr><td><strong>Checkout product</strong></td>
+            <td><?php echo $product_id
+                  ? esc_html(get_the_title($product_id)) . ' (ID ' . esc_html($product_id) . ')'
+                  : '<em>not set</em>'; ?></td></tr>
+        <tr><td><strong>Pricing tiers</strong></td><td><?php echo esc_html($tiers); ?></td></tr>
+        <tr><td><strong>Saved sheets</strong></td><td><?php echo esc_html($saves); ?></td></tr>
+        <tr><td><strong>Builder shortcode</strong></td><td><code>[gang_sheet_builder]</code></td></tr>
+      </tbody>
+    </table>
 
-      <h2 style="margin-top:26px">Modules</h2>
-      <table class="widefat striped" style="max-width:680px;">
-        <tbody>
-        <?php foreach ($modules as $label => $live): ?>
-          <tr>
-            <td><strong><?php echo esc_html($label); ?></strong></td>
-            <td><?php echo $live
-                  ? '<span style="color:#2E7D32;font-weight:700">Running from the plugin</span>'
-                  : '<span style="color:#b8860b;font-weight:700">Standing by</span> &mdash; its WPCode snippet is still active'; ?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
-      <p style="color:#666;max-width:680px">
-        A module stands down while its old snippet is active so nothing runs twice.
-        Deactivate the snippet in WPCode and the plugin picks it up on the next page load.
-      </p>
-
-      <form method="post" style="margin-top:16px;">
-        <?php wp_nonce_field('btdtf_check_update'); ?>
-        <button type="submit" name="btdtf_check_update" value="1" class="button button-primary">Check for updates now</button>
-      </form>
-    </div>
+    <h2 style="margin-top:26px">Modules</h2>
+    <table class="widefat striped" style="max-width:680px;">
+      <tbody>
+      <?php foreach ($modules as $label => $live): ?>
+        <tr>
+          <td><strong><?php echo esc_html($label); ?></strong></td>
+          <td><?php echo $live
+                ? '<span style="color:#2E7D32;font-weight:700">Running from the plugin</span>'
+                : '<span style="color:#b8860b;font-weight:700">Standing by</span> &mdash; its WPCode snippet is still active'; ?></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <p style="color:#666;max-width:680px">
+      A module stands down while its old snippet is active so nothing runs twice.
+      Deactivate the snippet in WPCode and the plugin picks it up on the next page load.
+    </p>
     <?php
+
+    // Shared BT panel — same layout, wording and button on every BT plugin.
+    if (function_exists('bt_admin_updates_panel')) {
+        bt_admin_updates_panel(array(
+            'slug'     => 'bt-dtf',
+            'version'  => BTDTF_VERSION,
+            'manifest' => 'btdtf_update_manifest',
+            'flush'    => 'btdtf_force_update_check',
+        ));
+    }
 }
