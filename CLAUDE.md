@@ -8,9 +8,30 @@ builder nests them and prices the sheet, and the order flows into WooCommerce.
 `btgsb-settings` and every option, table and meta key still uses `btgsb`, deliberately, so
 existing orders and settings carry over.
 
-- Current version: **0.7.0**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
+- Current version: **0.7.3**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
 - Repo: `strummer95/bt-dtf`
 - Builder UI: `bt-dtf/includes/frontend.php` (~3,660 lines), shortcode `[gang_sheet_builder]`
+
+## STANDING RULE: uploads keep their exact size and resolution
+
+Dillon has stated this twice (Apr 2026 and Sep 2026). Do not relitigate it.
+
+**The file decides. Assume nothing, resize nothing.** Customers upload print-ready art.
+6 inches wide at 200 DPI comes in as 6 inches wide reading 200 DPI. 4x5 at 300 comes in as
+4x5 at 300.
+
+- This covers **resolution as well as physical size.** A 200 DPI PDF is rasterized at 200,
+  never upsampled to 300 and reported as 300.
+- A PNG uses the DPI in its `pHYs` chunk (`readPngPhysDpi`). A PDF is placed at its real
+  page size and rasterized at the resolution of the art inside it. A vector-only PDF has
+  no resolution to preserve and renders at 300.
+- The old `nW / 150` estimate survives **only** for a file that states no resolution at
+  all. Do not widen it.
+- The only permitted size change is **shrinking to fit the sheet**. Never scale up.
+- Sizing lives in `defaultPrintSize()` in `includes/frontend.php`. Before 0.7.1 every
+  upload was sized as if it were 150 DPI, so correct 300 DPI art came in at double size
+  with a false Low DPI warning. That is the bug this rule exists to prevent.
+- 0.7.3: Download PDF on the order screen builds and downloads in place (no new tab).
 
 ## Environment
 
