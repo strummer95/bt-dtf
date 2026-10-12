@@ -29,6 +29,8 @@ function btdtf_defaults() {
             ['max'=>5280, 'rate'=>0.023],
             ['max'=>9999, 'rate'=>0.020],
         ],
+        'pricing_mode'  => 'flat',
+        'sheet_prices'  => [],
     ];
 }
 
@@ -90,6 +92,16 @@ function btdtf_settings_page() {
         }
         usort($tiers, fn($a,$b) => $a['max']<=>$b['max']);
         if ($tiers) $tiers[count($tiers)-1]['max'] = 9999;
+        $sheets = [];
+        $lens   = (array)($_POST['sheet_len']   ?? []);
+        $sprice = (array)($_POST['sheet_price'] ?? []);
+        foreach ($lens as $i => $len) {
+            $len = floatval($len); $pr = floatval($sprice[$i] ?? 0);
+            if ($len > 0 && $pr > 0) $sheets[] = ['len'=>$len, 'price'=>$pr];
+        }
+        usort($sheets, fn($a,$b) => $a['len']<=>$b['len']);
+        $mode = sanitize_key($_POST['pricing_mode'] ?? 'flat');
+        if (!in_array($mode, ['flat','graduated','fixed'], true)) $mode = 'flat';
         $saved = [
             'canvas_width'  => max(1,  floatval($_POST['canvas_width']  ?? 22)),
             'max_height'    => max(1,  floatval($_POST['max_height']     ?? 300)),
@@ -103,14 +115,18 @@ function btdtf_settings_page() {
             'button_text'   => sanitize_text_field($_POST['button_text']  ?? 'Add to Cart'),
             'button_color'  => sanitize_hex_color($_POST['button_color']  ?? '#27267e'),
             'pricing_tiers' => $tiers,
+            'pricing_mode'  => $mode,
+            'sheet_prices'  => $sheets,
         ];
         update_option(BTDTF_OPT, $saved);
         echo '<div class="updated"><p>Settings saved.</p></div>';
     }
 
     $s = get_option(BTDTF_OPT, btdtf_defaults());
-    $tiers = $s['pricing_tiers'] ?? [];
-    $pid   = get_option(BTDTF_PROD);
+    $tiers  = $s['pricing_tiers'] ?? [];
+    $mode   = $s['pricing_mode']  ?? 'flat';
+    $sheets = $s['sheet_prices']  ?? [];
+    $pid    = get_option(BTDTF_PROD);
     ?>
     <div class="wrap" style="max-width:800px">
     <h1><span style="color:#27267e;font-weight:900">BT Transfers</span> — Sheet Builder Settings</h1>
@@ -149,8 +165,18 @@ function btdtf_settings_page() {
         <tr><th>Button Label</th><td><input name="button_text" type="text" value="<?php echo esc_attr($s['button_text']); ?>" class="regular-text"></td></tr>
         <tr><th>Button Color</th><td><input name="button_color" type="color" value="<?php echo esc_attr($s['button_color']); ?>"></td></tr>
     </table>
-    <h2 style="border-bottom:1px solid #ddd;padding-bottom:6px">Pricing Tiers (per sq inch)</h2>
-    <p class="description">Tier selected by total sheet area — all sq inches billed at that tier's flat rate.</p>
+    <h2 style="border-bottom:1px solid #ddd;padding-bottom:6px">Pricing</h2>
+    <table class="form-table" style="margin-bottom:6px">
+        <tr><th>Pricing Method</th><td>
+            <label style="display:block;margin-bottom:6px"><input type="radio" name="pricing_mode" value="graduated" <?php checked($mode,'graduated'); ?>> <strong>Per sq inch, graduated</strong> <span class="description">(recommended) Each sq inch is billed at the rate of the tier it falls in. A longer sheet never costs less than a shorter one.</span></label>
+            <label style="display:block;margin-bottom:6px"><input type="radio" name="pricing_mode" value="flat" <?php checked($mode,'flat'); ?>> <strong>Per sq inch, whole sheet at one rate</strong> <span class="description">The whole sheet is billed at its tier's rate. Prices drop just past each break.</span></label>
+            <label style="display:block"><input type="radio" name="pricing_mode" value="fixed" <?php checked($mode,'fixed'); ?>> <strong>Fixed sheet prices</strong> <span class="description">Set prices per sheet length. A sheet is billed at the smallest size it fits on.</span></label>
+        </td></tr>
+    </table>
+
+    <div id="btgsb-tier-wrap">
+    <h3 style="margin:12px 0 4px">Rate Tiers (per sq inch)</h3>
+    <p class="description" style="margin-bottom:8px">264 sq in = 1 ft of a 22" sheet.</p>
     <table class="widefat striped" id="btgsb-tiers" style="max-width:560px;margin-bottom:10px">
         <thead><tr><th>Min sq in</th><th>Max sq in</th><th>Rate / sq in</th><th></th></tr></thead>
         <tbody>
@@ -165,6 +191,30 @@ function btdtf_settings_page() {
         </tbody>
     </table>
     <button type="button" class="button" id="btgsb-add-tier">＋ Add Tier</button>
+    </div>
+
+    <div id="btgsb-sheet-wrap">
+    <h3 style="margin:12px 0 4px">Sheet Prices</h3>
+    <p class="description" style="margin-bottom:8px">Length in inches on the <?php echo esc_html($s['canvas_width']); ?>" wide sheet. Anything longer than the biggest size is billed at that size's price per inch.</p>
+    <table class="widefat striped" id="btgsb-sheets" style="max-width:420px;margin-bottom:10px">
+        <thead><tr><th>Length (in)</th><th>Price</th><th></th></tr></thead>
+        <tbody>
+        <?php $rows = $sheets ?: [['len'=>'','price'=>'']]; foreach ($rows as $sh): ?>
+        <tr>
+            <td><input name="sheet_len[]" type="number" step="0.5" min="1" value="<?php echo esc_attr($sh['len']); ?>" style="width:90px"> in</td>
+            <td>$ <input name="sheet_price[]" type="number" step="0.01" min="0" value="<?php echo esc_attr($sh['price']); ?>" style="width:90px"></td>
+            <td><button type="button" class="button btgsb-del-sheet">✕</button></td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <button type="button" class="button" id="btgsb-add-sheet">＋ Add Sheet Size</button>
+    </div>
+
+    <h3 style="margin:18px 0 4px">Price Check</h3>
+    <p class="description" style="margin-bottom:8px">What customers pay at common lengths with the settings above (updates as you type, before saving). Red means it costs less than the shorter sheet before it.</p>
+    <table class="widefat striped" id="btgsb-price-check" style="max-width:420px"><thead><tr><th>Sheet</th><th>Price</th><th>Per foot</th></tr></thead><tbody></tbody></table>
+
     <p class="submit"><input type="submit" name="btgsb_save" class="button-primary" value="Save Settings"></p>
     </form>
     <?php
@@ -181,7 +231,66 @@ function btdtf_settings_page() {
         $(document).on('click','.btgsb-del-tier',function(){
             if($('#btgsb-tiers tbody tr').length>1) $(this).closest('tr').remove();
             else alert('You need at least one pricing tier.');
+            check();
         });
+        $('#btgsb-add-sheet').on('click',function(){
+            $('#btgsb-sheets tbody').append('<tr><td><input name="sheet_len[]" type="number" step="0.5" min="1" style="width:90px"> in</td><td>$ <input name="sheet_price[]" type="number" step="0.01" min="0" style="width:90px"></td><td><button type="button" class="button btgsb-del-sheet">✕</button></td></tr>');
+        });
+        $(document).on('click','.btgsb-del-sheet',function(){
+            if($('#btgsb-sheets tbody tr').length>1) $(this).closest('tr').remove();
+            else $(this).closest('tr').find('input').val('');
+            check();
+        });
+
+        // Mirrors calcPrice() in the builder (includes/frontend.php).
+        function readTiers(){
+            var t=[]; $('#btgsb-tiers tbody tr').each(function(){
+                var mx=$(this).find('[name="tier_max[]"]').val(), r=parseFloat($(this).find('[name="tier_rate[]"]').val());
+                if(!isNaN(r)) t.push({max: mx===''?Infinity:parseFloat(mx), rate:r});
+            });
+            t.sort(function(a,b){return a.max-b.max;}); if(t.length) t[t.length-1].max=Infinity; return t;
+        }
+        function readSheets(){
+            var t=[]; $('#btgsb-sheets tbody tr').each(function(){
+                var l=parseFloat($(this).find('[name="sheet_len[]"]').val()), p=parseFloat($(this).find('[name="sheet_price[]"]').val());
+                if(l>0&&p>0) t.push({len:l,price:p});
+            });
+            return t.sort(function(a,b){return a.len-b.len;});
+        }
+        function price(sq, mode, tiers, sheets, W){
+            if(mode==='fixed' && sheets.length){
+                var len=sq/W;
+                for(var i=0;i<sheets.length;i++) if(len<=sheets[i].len+0.001) return sheets[i].price;
+                var b=sheets[sheets.length-1]; return b.price+(len-b.len)*(b.price/b.len);
+            }
+            if(!tiers.length) return sq*0.02;
+            if(mode==='graduated'){
+                var tot=0,prev=0;
+                for(var j=0;j<tiers.length;j++){ var part=Math.min(sq,tiers[j].max)-prev; if(part>0) tot+=part*tiers[j].rate; if(sq<=tiers[j].max) break; prev=tiers[j].max; }
+                return tot;
+            }
+            for(var k=0;k<tiers.length;k++) if(sq<=tiers[k].max) return sq*tiers[k].rate;
+            return sq*tiers[tiers.length-1].rate;
+        }
+        function check(){
+            var mode=$('[name="pricing_mode"]:checked').val()||'flat';
+            $('#btgsb-tier-wrap').toggle(mode!=='fixed');
+            $('#btgsb-sheet-wrap').toggle(mode==='fixed');
+            var W=parseFloat($('[name="canvas_width"]').val())||22, moq=parseFloat($('[name="moq_sq_in"]').val())||0;
+            var tiers=readTiers(), sheets=readSheets();
+            var lens=[6,11,12,24,36,48,59,60,72,96,119,120,180,240];
+            var rows='', last=-1;
+            lens.forEach(function(L){
+                var sq=Math.max(moq,W*L), p=price(sq,mode,tiers,sheets,W);
+                var bad=p<last-0.005; last=Math.max(last,p);
+                var lbl=W+'" \u00D7 '+L+'"'+(L%12===0?' ('+(L/12)+' ft)':'');
+                rows+='<tr'+(bad?' style="background:#fde8e8"':'')+'><td>'+lbl+'</td><td'+(bad?' style="color:#b32d2e;font-weight:700"':'')+'>$'+p.toFixed(2)+'</td><td>$'+(p/(sq/W/12)).toFixed(2)+'</td></tr>';
+            });
+            $('#btgsb-price-check tbody').html(rows);
+        }
+        $(document).on('input change','#btgsb-tiers input, #btgsb-sheets input, [name="pricing_mode"], [name="canvas_width"], [name="moq_sq_in"]',check);
+        $('#btgsb-add-tier').on('click',check);
+        check();
     });
     </script>
     <?php

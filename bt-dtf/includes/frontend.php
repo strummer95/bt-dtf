@@ -1086,7 +1086,7 @@ function btdtf_render_builder() {
       <div class="bsum-row"><span>Sheet size <span style="color:#888;font-size:11px;font-weight:400">(<?php echo (int)$s['start_height']; ?>" minimum sheet length)</span></span>   <strong id="bsum-size">&mdash;</strong></div>
       <div class="bsum-row"><span>Total area</span>   <strong id="bsum-area">&mdash;</strong></div>
       <div class="bsum-row"><span>Total pieces</span> <strong id="bsum-pieces">&mdash;</strong></div>
-      <div class="bsum-row"><span>Pricing tier</span> <strong id="bsum-tier" class="bsum-tier">&mdash;</strong></div>
+      <div class="bsum-row"><span><?php echo (($s['pricing_mode'] ?? 'flat') === 'fixed' && !empty($s['sheet_prices'])) ? 'Billed as' : 'Pricing'; ?></span> <strong id="bsum-tier" class="bsum-tier">&mdash;</strong></div>
       <div class="bsum-row bsum-total"><span>Total</span><strong id="bsum-price">$0.00</strong></div>
       <button id="btgsb-save-btn" type="button" style="display:block;width:100%;margin-bottom:8px;padding:10px;border:1px solid #27267e;border-radius:8px;background:#fff;color:#27267e;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s">&#128190; Save This Sheet</button>
       <button id="btgsb-order-btn" style="background:<?php echo $btnc; ?>" disabled><?php echo $btn; ?></button>
@@ -1127,6 +1127,12 @@ jQuery(function($){
     var DPI_FINE   = parseInt(S.dpi_fine        || 200);
     var EXPORT_DPI = parseInt(S.export_dpi      || 200);
     var TIERS      = S.pricing_tiers            || [];
+    var PRICE_MODE = S.pricing_mode             || 'flat';
+    var SHEET_PRICES = (S.sheet_prices || []).map(function(r){
+        return {len: parseFloat(r.len), price: parseFloat(r.price)};
+    }).filter(function(r){ return r.len > 0 && r.price > 0; })
+      .sort(function(a,b){ return a.len - b.len; });
+    if (PRICE_MODE === 'fixed' && !SHEET_PRICES.length) PRICE_MODE = 'flat';
 
     // Generated name/number pieces render at 300 DPI, the same bar the tool
     // sets for uploaded art. They were 200, which is what they printed at.
@@ -1216,7 +1222,43 @@ jQuery(function($){
             if (sq <= parseFloat(TIERS[i].max)) return parseFloat(TIERS[i].rate);
         return TIERS.length ? parseFloat(TIERS[TIERS.length-1].rate) : 0.02;
     }
-    function calcPrice(sq) { return sq * getRate(sq); }
+    // Graduated: each sq inch is billed at the rate of the tier it falls in,
+    // so a longer sheet never costs less than a shorter one.
+    function calcGraduated(sq) {
+        var total = 0, prev = 0;
+        for (var i=0; i<TIERS.length; i++) {
+            var max  = (i === TIERS.length-1) ? Infinity : parseFloat(TIERS[i].max);
+            var part = Math.min(sq, max) - prev;
+            if (part > 0) total += part * parseFloat(TIERS[i].rate);
+            if (sq <= max) break;
+            prev = max;
+        }
+        return TIERS.length ? total : sq * 0.02;
+    }
+    // Fixed: the sheet is billed at the smallest listed size it fits on.
+    // Past the largest size, extra length is billed at that size's per-inch price.
+    function fixedSheet(sq) {
+        var len = sq / SHEET_W;
+        for (var i=0; i<SHEET_PRICES.length; i++)
+            if (len <= SHEET_PRICES[i].len + 0.001) return {sheet: SHEET_PRICES[i], price: SHEET_PRICES[i].price};
+        var big = SHEET_PRICES[SHEET_PRICES.length-1];
+        return {sheet: null, price: big.price + (len - big.len) * (big.price / big.len)};
+    }
+    function calcPrice(sq) {
+        if (PRICE_MODE === 'graduated') return calcGraduated(sq);
+        if (PRICE_MODE === 'fixed')     return fixedSheet(sq).price;
+        return sq * getRate(sq);
+    }
+    function priceLabel(sq) {
+        if (PRICE_MODE === 'graduated')
+            return 'Avg $' + (calcGraduated(sq) / sq).toFixed(3) + '/sq in';
+        if (PRICE_MODE === 'fixed') {
+            var f = fixedSheet(sq);
+            return f.sheet ? SHEET_W + '\u2033 \u00D7 ' + f.sheet.len + '\u2033 sheet'
+                           : 'Custom length, over ' + SHEET_PRICES[SHEET_PRICES.length-1].len + '\u2033';
+        }
+        return tierLabel(sq);
+    }
     function tierLabel(sq) {
         for (var i=0; i<TIERS.length; i++) {
             var prev = i===0 ? 0 : parseFloat(TIERS[i-1].max);
@@ -1853,7 +1895,7 @@ jQuery(function($){
         $('#bsum-size').text(hasDesigns ? SHEET_W+'" \u00D7 '+sheetH.toFixed(2)+'"' : '\u2014');
         $('#bsum-area').text(hasDesigns ? Math.round(sqIn).toLocaleString()+' sq in' : '\u2014');
         $('#bsum-pieces').text(hasDesigns ? totalPieces : '\u2014');
-        $('#bsum-tier').text(hasDesigns ? tierLabel(sqIn) : '\u2014');
+        $('#bsum-tier').text(hasDesigns ? priceLabel(sqIn) : '\u2014');
         $('#bsum-price').text(hasDesigns ? '$'+price.toFixed(2) : '$0.00');
         $('#btgsb-order-btn').prop('disabled', !hasDesigns);
 
