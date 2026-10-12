@@ -1247,7 +1247,17 @@ jQuery(function($){
     function calcPrice(sq) {
         if (PRICE_MODE === 'graduated') return calcGraduated(sq);
         if (PRICE_MODE === 'fixed')     return fixedSheet(sq).price;
-        return sq * getRate(sq);
+        return flatPrice(sq);
+    }
+    // Whole sheet at one rate, but never less than a full sheet at the top
+    // of any lower tier. Without this, 13" billed less than 12".
+    function flatPrice(sq) {
+        var p = sq * getRate(sq);
+        for (var i=0; i<TIERS.length-1; i++) {
+            var mx = parseFloat(TIERS[i].max);
+            if (mx < sq) p = Math.max(p, mx * parseFloat(TIERS[i].rate));
+        }
+        return p;
     }
     function priceLabel(sq) {
         if (PRICE_MODE === 'graduated')

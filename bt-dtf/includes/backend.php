@@ -169,7 +169,7 @@ function btdtf_settings_page() {
     <table class="form-table" style="margin-bottom:6px">
         <tr><th>Pricing Method</th><td>
             <label style="display:block;margin-bottom:6px"><input type="radio" name="pricing_mode" value="graduated" <?php checked($mode,'graduated'); ?>> <strong>Per sq inch, graduated</strong> <span class="description">(recommended) Each sq inch is billed at the rate of the tier it falls in. A longer sheet never costs less than a shorter one.</span></label>
-            <label style="display:block;margin-bottom:6px"><input type="radio" name="pricing_mode" value="flat" <?php checked($mode,'flat'); ?>> <strong>Per sq inch, whole sheet at one rate</strong> <span class="description">The whole sheet is billed at its tier's rate. Prices drop just past each break.</span></label>
+            <label style="display:block;margin-bottom:6px"><input type="radio" name="pricing_mode" value="flat" <?php checked($mode,'flat'); ?>> <strong>Per sq inch, whole sheet at one rate</strong> <span class="description">The whole sheet is billed at its tier's rate, and never less than a full sheet at the top of the tier below it.</span></label>
             <label style="display:block"><input type="radio" name="pricing_mode" value="fixed" <?php checked($mode,'fixed'); ?>> <strong>Fixed sheet prices</strong> <span class="description">Set prices per sheet length. A sheet is billed at the smallest size it fits on.</span></label>
         </td></tr>
     </table>
@@ -270,8 +270,14 @@ function btdtf_settings_page() {
                 for(var j=0;j<tiers.length;j++){ var part=Math.min(sq,tiers[j].max)-prev; if(part>0) tot+=part*tiers[j].rate; if(sq<=tiers[j].max) break; prev=tiers[j].max; }
                 return tot;
             }
-            for(var k=0;k<tiers.length;k++) if(sq<=tiers[k].max) return sq*tiers[k].rate;
-            return sq*tiers[tiers.length-1].rate;
+            // Whole sheet: never less than a full sheet at the top of a lower tier.
+            var p=null, floor=0;
+            for(var k=0;k<tiers.length;k++){
+                if(sq<=tiers[k].max){ p=sq*tiers[k].rate; break; }
+                floor=Math.max(floor, tiers[k].max*tiers[k].rate);
+            }
+            if(p===null) p=sq*tiers[tiers.length-1].rate;
+            return Math.max(p, floor);
         }
         function check(){
             var mode=$('[name="pricing_mode"]:checked').val()||'flat';
