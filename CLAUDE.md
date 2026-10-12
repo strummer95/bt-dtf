@@ -8,7 +8,7 @@ builder nests them and prices the sheet, and the order flows into WooCommerce.
 `btgsb-settings` and every option, table and meta key still uses `btgsb`, deliberately, so
 existing orders and settings carry over.
 
-- Current version: **0.8.1**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
+- Current version: **0.8.2**. Constant `BTDTF_VERSION`, function prefix `btdtf_`.
 - Repo: `strummer95/bt-dtf`
 - Builder UI: `bt-dtf/includes/frontend.php` (~3,660 lines), shortcode `[gang_sheet_builder]`
 

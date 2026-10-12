@@ -177,14 +177,15 @@ function btdtf_settings_page() {
     <div id="btgsb-tier-wrap">
     <h3 style="margin:12px 0 4px">Rate Tiers (per sq inch)</h3>
     <p class="description" style="margin-bottom:8px">264 sq in = 1 ft of a 22" sheet.</p>
-    <table class="widefat striped" id="btgsb-tiers" style="max-width:560px;margin-bottom:10px">
-        <thead><tr><th>Min sq in</th><th>Max sq in</th><th>Rate / sq in</th><th></th></tr></thead>
+    <table class="widefat striped" id="btgsb-tiers" style="max-width:940px;margin-bottom:10px">
+        <thead><tr><th>Min sq in</th><th>Max sq in</th><th>Rate / sq in</th><th>Sheet length</th><th>Per foot</th><th>Full sheet at end of tier</th><th></th></tr></thead>
         <tbody>
         <?php $prev=0; foreach($tiers as $i=>$tier): $last=($i===count($tiers)-1); ?>
         <tr>
             <td style="padding:8px 10px;font-weight:600;color:#555"><?php echo number_format($prev); ?></td>
             <td><input name="tier_max[]" type="number" step="1" min="1" value="<?php echo esc_attr($last?'':$tier['max']); ?>" placeholder="(last)" style="width:100px"></td>
             <td>$ <input name="tier_rate[]" type="number" step="0.001" min="0" value="<?php echo esc_attr($tier['rate']); ?>" style="width:80px"> / sq in</td>
+            <td class="btgsb-ti-len"></td><td class="btgsb-ti-ft" style="font-weight:600"></td><td class="btgsb-ti-tot"></td>
             <td><button type="button" class="button btgsb-del-tier">✕</button></td>
         </tr>
         <?php $prev=$last?$prev:$tier['max']; endforeach; ?>
@@ -226,7 +227,7 @@ function btdtf_settings_page() {
     <script>
     jQuery(function($){
         $('#btgsb-add-tier').on('click',function(){
-            $('#btgsb-tiers tbody').append('<tr><td style="padding:8px 10px;font-weight:600;color:#555">—</td><td><input name="tier_max[]" type="number" step="1" min="1" placeholder="(last)" style="width:100px"></td><td>$ <input name="tier_rate[]" type="number" step="0.001" min="0" style="width:80px"> / sq in</td><td><button type="button" class="button btgsb-del-tier">✕</button></td></tr>');
+            $('#btgsb-tiers tbody').append('<tr><td style="padding:8px 10px;font-weight:600;color:#555">—</td><td><input name="tier_max[]" type="number" step="1" min="1" placeholder="(last)" style="width:100px"></td><td>$ <input name="tier_rate[]" type="number" step="0.001" min="0" style="width:80px"> / sq in</td><td class="btgsb-ti-len"></td><td class="btgsb-ti-ft" style="font-weight:600"></td><td class="btgsb-ti-tot"></td><td><button type="button" class="button btgsb-del-tier">✕</button></td></tr>');
         });
         $(document).on('click','.btgsb-del-tier',function(){
             if($('#btgsb-tiers tbody tr').length>1) $(this).closest('tr').remove();
@@ -293,6 +294,22 @@ function btdtf_settings_page() {
                 rows+='<tr'+(bad?' style="background:#fde8e8"':'')+'><td>'+lbl+'</td><td'+(bad?' style="color:#b32d2e;font-weight:700"':'')+'>$'+p.toFixed(2)+'</td><td>$'+(p/(sq/W/12)).toFixed(2)+'</td></tr>';
             });
             $('#btgsb-price-check tbody').html(rows);
+
+            // Plain-English columns on each tier row: the sheet lengths it
+            // covers, its rate as $ per foot, and what a sheet costs at its end.
+            function inch(L){ L=Math.round(L*100)/100; return (L%12===0 && L>0) ? L+'" ('+(L/12)+' ft)' : L+'"'; }
+            var $rows=$('#btgsb-tiers tbody tr'), n=$rows.length, prevMax=0;
+            $rows.each(function(i){
+                var $r=$(this), mx=$r.find('[name="tier_max[]"]').val(), r=parseFloat($r.find('[name="tier_rate[]"]').val());
+                var last=(i===n-1), max=last?Infinity:parseFloat(mx);
+                if(isNaN(r) || (!last && isNaN(max))){ $r.find('.btgsb-ti-len,.btgsb-ti-ft,.btgsb-ti-tot').text(''); return; }
+                var fromL=prevMax/W, toL=last?maxH:max/W;
+                $r.find('.btgsb-ti-len').text(last ? 'Over '+inch(fromL) : (i===0 ? 'Up to '+inch(toL) : inch(fromL)+' to '+inch(toL)));
+                $r.find('.btgsb-ti-ft').text('$'+(r*W*12).toFixed(2)+(mode==='graduated'?' per added ft':'/ft, whole sheet'));
+                var endSq=Math.max(moq, last?W*maxH:max);
+                $r.find('.btgsb-ti-tot').text(inch(endSq/W)+' sheet = $'+price(endSq,mode,tiers,sheets,W).toFixed(2));
+                if(!last) prevMax=max;
+            });
         }
         $(document).on('input change','#btgsb-tiers input, #btgsb-sheets input, [name="pricing_mode"], [name="canvas_width"], [name="moq_sq_in"], [name="max_height"]',check);
         $('#btgsb-add-tier').on('click',check);
