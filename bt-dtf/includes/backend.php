@@ -278,7 +278,13 @@ function btdtf_settings_page() {
             $('#btgsb-sheet-wrap').toggle(mode==='fixed');
             var W=parseFloat($('[name="canvas_width"]').val())||22, moq=parseFloat($('[name="moq_sq_in"]').val())||0;
             var tiers=readTiers(), sheets=readSheets();
-            var lens=[6,11,12,24,36,48,59,60,72,96,119,120,180,240];
+            // Common lengths plus each break and 1" past it, where the
+            // whole-sheet method drops in price.
+            var lens=[6,12,24,36,48,60,72,96,120,180,240];
+            tiers.forEach(function(t){ if(isFinite(t.max)){ var b=Math.round(t.max/W*100)/100; lens.push(b, Math.floor(b)+1); } });
+            if(mode==='fixed') sheets.forEach(function(sh){ lens.push(sh.len, Math.floor(sh.len)+1); });
+            var maxH=parseFloat($('[name="max_height"]').val())||300;
+            lens=lens.filter(function(L,i,a){ return L>0 && L<=maxH && a.indexOf(L)===i; }).sort(function(a,b){return a-b;});
             var rows='', last=-1;
             lens.forEach(function(L){
                 var sq=Math.max(moq,W*L), p=price(sq,mode,tiers,sheets,W);
@@ -288,7 +294,7 @@ function btdtf_settings_page() {
             });
             $('#btgsb-price-check tbody').html(rows);
         }
-        $(document).on('input change','#btgsb-tiers input, #btgsb-sheets input, [name="pricing_mode"], [name="canvas_width"], [name="moq_sq_in"]',check);
+        $(document).on('input change','#btgsb-tiers input, #btgsb-sheets input, [name="pricing_mode"], [name="canvas_width"], [name="moq_sq_in"], [name="max_height"]',check);
         $('#btgsb-add-tier').on('click',check);
         check();
     });
