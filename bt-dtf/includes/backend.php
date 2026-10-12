@@ -303,6 +303,7 @@ function btdtf_settings_page() {
                 var $r=$(this), mx=$r.find('[name="tier_max[]"]').val(), r=parseFloat($r.find('[name="tier_rate[]"]').val());
                 var last=(i===n-1), max=last?Infinity:parseFloat(mx);
                 if(isNaN(r) || (!last && isNaN(max))){ $r.find('.btgsb-ti-len,.btgsb-ti-ft,.btgsb-ti-tot').text(''); return; }
+                $r.children('td').first().text(prevMax.toLocaleString());
                 var fromL=prevMax/W, toL=last?maxH:max/W;
                 $r.find('.btgsb-ti-len').text(last ? 'Over '+inch(fromL) : (i===0 ? 'Up to '+inch(toL) : inch(fromL)+' to '+inch(toL)));
                 $r.find('.btgsb-ti-ft').text('$'+(r*W*12).toFixed(2)+(mode==='graduated'?' per added ft':'/ft, whole sheet'));
