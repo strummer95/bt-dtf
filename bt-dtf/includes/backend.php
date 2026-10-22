@@ -569,13 +569,59 @@ function btdtf_ajax_save_sheet() {
     }
 }
 
+/**
+ * Server-side price for sq_in square inches, mirroring calcPrice() in the
+ * builder (includes/frontend.php) and the identical price() preview in this
+ * file. The add-to-cart AJAX handler used to take the customer's own POSTed
+ * price at face value — anyone could submit an arbitrary low price alongside
+ * a legitimate sq_inches and check out a sheet for pennies. This recomputes
+ * the price from the stored tiers/sheet settings so the POSTed price is
+ * never trusted.
+ */
+function btdtf_calc_price($sq_in, $settings) {
+    $mode   = $settings['pricing_mode']  ?? 'flat';
+    $tiers  = $settings['pricing_tiers'] ?? [];
+    $sheets = $settings['sheet_prices']  ?? [];
+    $w      = floatval($settings['canvas_width'] ?? 22) ?: 22;
+
+    if ($mode === 'fixed' && $sheets) {
+        $len = $sq_in / $w;
+        foreach ($sheets as $sh) {
+            if ($len <= $sh['len'] + 0.001) return (float) $sh['price'];
+        }
+        $b = end($sheets);
+        return (float) $b['price'] + ($len - $b['len']) * ($b['price'] / $b['len']);
+    }
+    if (!$tiers) return $sq_in * 0.02;
+
+    if ($mode === 'graduated') {
+        $total = 0; $prev = 0;
+        foreach ($tiers as $t) {
+            $part = min($sq_in, $t['max']) - $prev;
+            if ($part > 0) $total += $part * $t['rate'];
+            if ($sq_in <= $t['max']) break;
+            $prev = $t['max'];
+        }
+        return $total;
+    }
+
+    // Flat / whole sheet: never less than a full sheet at the top of a lower tier.
+    $price = null; $floor = 0;
+    foreach ($tiers as $t) {
+        if ($sq_in <= $t['max']) { $price = $sq_in * $t['rate']; break; }
+        $floor = max($floor, $t['max'] * $t['rate']);
+    }
+    if ($price === null) { $last = end($tiers); $price = $sq_in * $last['rate']; }
+    return max($price, $floor);
+}
+
 function btdtf_ajax_add_to_cart() {
     check_ajax_referer('btgsb_nonce', 'nonce');
     if (!function_exists('WC')) wp_send_json_error('WooCommerce not active.');
     $pid = (int)get_option(BTDTF_PROD, 0);
     if (!$pid) wp_send_json_error('Gang sheet product missing — visit PS Studio settings to regenerate.');
-    $sq_in     = floatval($_POST['sq_inches']     ?? 0);
-    $price     = floatval($_POST['price']          ?? 0);
+    $settings  = get_option(BTDTF_OPT, btdtf_defaults());
+    $sq_in     = max(floatval($_POST['sq_inches'] ?? 0), floatval($settings['moq_sq_in'] ?? 0));
     $height_in = floatval($_POST['height_inches']  ?? 0);
     $width_in  = floatval($_POST['width_inches']   ?? 22);
     $sheet_url = esc_url_raw($_POST['sheet_url']   ?? '');
@@ -605,7 +651,9 @@ function btdtf_ajax_add_to_cart() {
         }
         if ($clean['p']) $layout_json = wp_json_encode($clean);
     }
-    if ($sq_in <= 0 || $price <= 0) wp_send_json_error('Invalid order data.');
+    if ($sq_in <= 0) wp_send_json_error('Invalid order data.');
+    $price = btdtf_calc_price($sq_in, $settings);
+    if ($price <= 0) wp_send_json_error('Invalid order data.');
     WC()->cart->empty_cart();
     $key = WC()->cart->add_to_cart($pid, 1, 0, [], [
         'btgsb_price'      => $price,
