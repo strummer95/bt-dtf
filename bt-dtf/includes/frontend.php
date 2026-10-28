@@ -3957,7 +3957,16 @@ jQuery(function($){
                     if (cart && cart.success) {
                         setStatus('Added to cart! Redirecting\u2026', 'success');
                         try { localStorage.removeItem('btgsb_autosave'); } catch(e){}
-                        window.location.href = (cart.data && cart.data.cart_url) ? cart.data.cart_url : BTGSB.cart_url;
+                        var goCart = (cart.data && cart.data.cart_url) ? cart.data.cart_url : BTGSB.cart_url;
+                        // Meta AddToCart. Short wait so the event is sent before the page changes.
+                        var tracked = false;
+                        try {
+                            if (typeof fbq === 'function') {
+                                fbq('track', 'AddToCart', { value: Number((info.price || 0).toFixed(2)), currency: 'USD', content_name: 'DTF Gang Sheet', content_type: 'product' });
+                                tracked = true;
+                            }
+                        } catch(e){}
+                        setTimeout(function(){ window.location.href = goCart; }, tracked ? 400 : 0);
                     } else {
                         throw new Error((cart && cart.data) ? cart.data : 'Could not add to cart.');
                     }
