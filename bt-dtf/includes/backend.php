@@ -371,6 +371,22 @@ function btdtf_ensure_png_dpi($file_path, $dpi) {
 // number) plus the per-design list with x{qty} copy counts. When the
 // combined full-sheet PNG/PDF was not generated (sheet too large to render
 // as one image), it shows an explanatory note instead of an error.
+/* ── Stored file URLs follow the site ────────────────────────────────── */
+// Sheet and ZIP URLs are absolute and are written into the order when the
+// file is uploaded, so they keep whatever scheme and host the site had that
+// day. After a server move or an http/https change they no longer match the
+// page they are shown on: the browser treats them as cross-origin, silently
+// blocks the download attribute, and refuses the canvas read the PDF needs.
+// Rebuilding them onto the current site keeps the path and fixes both.
+function btdtf_local_url($url) {
+    if (!$url) return $url;
+    $p = wp_parse_url($url);
+    if (empty($p['path'])) return $url;
+    $out = rtrim(home_url(), '/') . $p['path'];
+    if (!empty($p['query'])) $out .= '?' . $p['query'];
+    return $out;
+}
+
 function btdtf_production_files_html($order, $context) {
     if (!is_object($order) || !method_exists($order, 'get_items')) return '';
 
@@ -393,6 +409,8 @@ function btdtf_production_files_html($order, $context) {
         $c = $item->get_meta('_btgsb_combined');
         if ($c === '0' || $c === 0) $combined_made = false;
     }
+
+    $zip_url = btdtf_local_url($zip_url);
 
     if (!$zip_url && empty($manifest)) return '';
 
@@ -690,6 +708,8 @@ function btdtf_pdf_job_for_order($order) {
         if (!$sh) $sh = $item->get_meta('Sheet File'); // legacy
         if ($sh && !$job['sheet']) $job['sheet'] = $sh;
     }
+    $job['zip']   = btdtf_local_url($job['zip']);
+    $job['sheet'] = btdtf_local_url($job['sheet']);
     return $job;
 }
 
@@ -1333,6 +1353,7 @@ function btdtf_register_hooks() {
         // Read new hidden keys, fall back to legacy public keys for old orders
         $sheet_url    = $item->get_meta('_btgsb_sheet_url');
         if (!$sheet_url) $sheet_url = $item->get_meta('Sheet File');
+        $sheet_url    = btdtf_local_url($sheet_url);
         $design_files = $item->get_meta('_btgsb_design_files');
         if (!$design_files) $design_files = $item->get_meta('Design Files');
     

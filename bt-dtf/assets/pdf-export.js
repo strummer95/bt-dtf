@@ -211,13 +211,26 @@
         });
     }
 
+    // The sheet URL was stored when the file was uploaded, so it carries the
+    // scheme and host the site had then. Canvas reads need it to be the SAME
+    // origin as this page, and http:// vs https:// alone is enough to make it
+    // foreign, so put it back on the current site before loading it.
+    function sameOriginUrl(url) {
+        try {
+            var u = new URL(url, location.href);
+            u.protocol = location.protocol;
+            u.host     = location.host;
+            return u.href;
+        } catch (e) { return url; }
+    }
+
     function loadImage(url) {
         return new Promise(function (resolve, reject) {
             var img = new Image();
             img.crossOrigin = 'anonymous';
             img.onload  = function () { resolve(img); };
             img.onerror = function () { reject(new Error('Could not load the sheet image. It may have been moved or deleted.')); };
-            img.src = url;
+            img.src = sameOriginUrl(url);
         });
     }
 
