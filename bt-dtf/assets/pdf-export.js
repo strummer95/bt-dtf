@@ -1,7 +1,7 @@
 /**
  * BT Transfers: print-ready PDF export for gang sheet orders.
  *
- * A PDF page cannot be taller than 200 inches (14,400 points). jsPDF clamps a
+ * A PDF page cannot be taller than 200 inches (14,400 points). The writer clamps a
  * taller page to 200 and still draws the art at full size, so the bottom of a
  * long sheet silently fell off the page. Sheets are now split into as many
  * PDFs as it takes, and a split never runs through a piece: every piece lands
@@ -101,13 +101,15 @@
             var qty = Math.max(1, parseInt(row && row.qty, 10) || 1);
             if (!(w > 0 && h > 0) || !row.file) return;
             if (w > usable + EPS && h <= usable + EPS) { var t = w; w = h; h = t; }
-            for (var q = 0; q < qty; q++) pieces.push({ file: row.file, w: w, h: h, r: 'auto' });
+            for (var q = 0; q < qty; q++) pieces.push({ file: row.file, w: w, h: h, r: 'auto',
+                                                        pdf: row.pdf || '', pdfPage: row.pdfPage || 1 });
         });
         pieces.sort(function (a, b) { return (b.h - a.h) || (b.w - a.w); });
         var x = pad, y = pad, rowH = 0, out = [];
         pieces.forEach(function (p) {
             if (x > pad + EPS && x + p.w > sheetW - pad + EPS) { y += rowH + margin; x = pad; rowH = 0; }
-            out.push({ file: p.file, x: x, y: y, w: p.w, h: p.h, r: p.r });
+            out.push({ file: p.file, x: x, y: y, w: p.w, h: p.h, r: p.r,
+                       pdf: p.pdf || '', pdfPage: p.pdfPage || 1 });
             x += p.w + margin;
             rowH = Math.max(rowH, p.h);
         });
@@ -125,7 +127,8 @@
             L.p.forEach(function (p) {
                 var row = manifest[parseInt(p.i, 10)];
                 if (!row || !row.file) { ok = false; return; }
-                items.push({ file: row.file, x: num(p.x, 0), y: num(p.y, 0), w: num(p.w, 0), h: num(p.h, 0), r: p.r ? 1 : 0 });
+                items.push({ file: row.file, x: num(p.x, 0), y: num(p.y, 0), w: num(p.w, 0), h: num(p.h, 0), r: p.r ? 1 : 0,
+                             pdf: row.pdf || '', pdfPage: row.pdfPage || 1 });
             });
             if (ok && items.length) {
                 var sheetW = num(L.w, num(job.sheetW, 22));
@@ -150,40 +153,86 @@
 
     /* -- PDF assembly -------------------------------------------------- */
 
-    // deps.jsPDF: constructor. deps.getArt(file, r, wIn, hIn) resolves to
-    // { bytes: Uint8Array PNG already turned to fit the footprint, dpi }.
+    // deps.PDFLib: the pdf-lib module. deps.getArt(item) resolves to either
+    //   { kind: 'pdf', bytes, pageIndex }   the customer's own file, or
+    //   { kind: 'png', bytes, dpi }         a raster already turned to fit.
+    //
+    // A 'pdf' piece is PLACED, not drawn: pdf-lib copies the page in as a form
+    // XObject, so vector art stays vector and any bitmap inside keeps its own
+    // pixels. Nothing about it is re-rendered at any resolution.
+    //
+    // pdf-lib works in points from the BOTTOM-left; the plan is in inches from
+    // the TOP-left, which is where the y flip below comes from.
     function buildPdfs(plan, deps, onProgress) {
-        var results = [], lowDpi = Infinity, seq = Promise.resolve();
+        var PDFLib = deps.PDFLib;
+        var degrees = PDFLib.degrees;
+        var results = [], lowDpi = Infinity, passthrough = 0, seq = Promise.resolve();
+
+        function place(pg, art, it, page) {
+            var x = it.x * 72;
+            var w = it.w * 72;
+            var h = it.h * 72;
+            var y = (page.h - (it.y - page.top) - it.h) * 72;   // flip to bottom-left
+            if (art.kind !== 'pdf') { pg.drawImage(art.emb, { x: x, y: y, width: w, height: h }); return; }
+            if (!art.rot) { pg.drawPage(art.emb, { x: x, y: y, width: w, height: h }); return; }
+            // Turned a quarter turn about (x,y): the page is scaled into an
+            // h-wide by w-tall box first, then rotated into the w by h slot,
+            // so the anchor moves to the slot's right edge.
+            pg.drawPage(art.emb, { x: x + w, y: y, width: h, height: w, rotate: degrees(90) });
+        }
+
         plan.pages.forEach(function (page, k) {
             seq = seq.then(function () {
                 if (onProgress) onProgress(k, plan.pages.length);
-                var pdf = new deps.jsPDF({
-                    orientation: page.h >= plan.sheetW ? 'portrait' : 'landscape',
-                    unit: 'in', format: [plan.sheetW, page.h], compress: true
-                });
-                var groups = {}, keys = [];
-                page.items.forEach(function (it) {
-                    var key = it.file + '|' + it.r + '|' + it.w.toFixed(3) + 'x' + it.h.toFixed(3);
-                    if (!groups[key]) { groups[key] = []; keys.push(key); }
-                    groups[key].push(it);
-                });
-                var gseq = Promise.resolve();
-                keys.forEach(function (key, gi) {
-                    gseq = gseq.then(function () {
-                        var first = groups[key][0];
-                        return deps.getArt(first.file, first.r, first.w, first.h).then(function (art) {
-                            if (art.dpi < lowDpi) lowDpi = art.dpi;
-                            var alias = 'p' + k + 'a' + gi;   // one embedded image per design per page
-                            groups[key].forEach(function (it) {
-                                pdf.addImage(art.bytes, 'PNG', it.x, it.y - page.top, it.w, it.h, alias, 'FAST');
+                return PDFLib.PDFDocument.create().then(function (doc) {
+                    var pg = doc.addPage([plan.sheetW * 72, page.h * 72]);
+                    var groups = {}, keys = [], embedded = {};
+                    page.items.forEach(function (it) {
+                        var key = it.file + '|' + it.r + '|' + it.w.toFixed(3) + 'x' + it.h.toFixed(3);
+                        if (!groups[key]) { groups[key] = []; keys.push(key); }
+                        groups[key].push(it);
+                    });
+                    var gseq = Promise.resolve();
+                    keys.forEach(function (key) {
+                        gseq = gseq.then(function () {
+                            var first = groups[key][0];
+                            return deps.getArt(first).then(function (art) {
+                                if (art.kind === 'pdf') {
+                                    var cacheKey = art.file + '#' + art.pageIndex;
+                                    var got = embedded[cacheKey]
+                                        ? Promise.resolve(embedded[cacheKey])
+                                        : doc.embedPdf(art.bytes, [art.pageIndex]).then(function (pp) {
+                                              embedded[cacheKey] = pp[0];
+                                              return pp[0];
+                                          });
+                                    return got.then(function (emb) {
+                                        passthrough += groups[key].length;
+                                        var rot = (first.r === 'auto')
+                                            ? shouldRotate(emb.width, emb.height, first.w, first.h)
+                                            : !!first.r;
+                                        groups[key].forEach(function (it) {
+                                            place(pg, { kind: 'pdf', emb: emb, rot: rot }, it, page);
+                                        });
+                                    });
+                                }
+                                if (art.dpi < lowDpi) lowDpi = art.dpi;
+                                return doc.embedPng(art.bytes).then(function (img) {
+                                    groups[key].forEach(function (it) {
+                                        place(pg, { kind: 'png', emb: img }, it, page);
+                                    });
+                                });
                             });
                         });
                     });
+                    return gseq
+                        .then(function () { return doc.save(); })
+                        .then(function (bytes) { results.push({ bytes: bytes, page: page }); });
                 });
-                return gseq.then(function () { results.push({ pdf: pdf, page: page }); });
             });
         });
-        return seq.then(function () { return { docs: results, lowDpi: lowDpi }; });
+        return seq.then(function () {
+            return { docs: results, lowDpi: lowDpi, passthrough: passthrough };
+        });
     }
 
     function fileNames(base, count) {
@@ -249,10 +298,27 @@
     }
 
     // Every piece goes through a canvas so odd uploads (16-bit, palette,
-    // interlaced, JPEG) all reach jsPDF as plain 8-bit RGBA PNG.
+    // interlaced, JPEG) all reach the PDF as plain 8-bit RGBA PNG.
     function makeArtLoader(zip) {
-        var blobs = {};
-        return function getArt(file, r, wIn, hIn) {
+        var blobs = {}, pdfs = {};
+        return function getArt(it) {
+            var file = it.file, r = it.r, wIn = it.w, hIn = it.h;
+
+            // The customer's own PDF page, if this piece came from one. It is
+            // handed back untouched - no canvas, no decode, no resample.
+            if (it.pdf) {
+                var pf = zip.file(it.pdf);
+                if (pf) {
+                    if (!pdfs[it.pdf]) pdfs[it.pdf] = pf.async('uint8array');
+                    return pdfs[it.pdf].then(function (bytes) {
+                        return { kind: 'pdf', file: it.pdf, bytes: bytes,
+                                 pageIndex: Math.max(0, (parseInt(it.pdfPage, 10) || 1) - 1) };
+                    });
+                }
+                // Falls through to the PNG beside it only if the PDF is not in
+                // the ZIP (an order packed before 0.9.0).
+            }
+
             if (!blobs[file]) {
                 var f = zip.file(file);
                 if (!f) return Promise.reject(new Error('Missing from the production ZIP: ' + file));
@@ -279,7 +345,7 @@
                 var dpi = Math.min(c.width / wIn, c.height / hIn);
                 return canvasToBytes(c).then(function (bytes) {
                     c.width = c.height = 0;
-                    return { bytes: bytes, dpi: dpi };
+                    return { kind: 'png', bytes: bytes, dpi: dpi };
                 });
             });
         };
@@ -311,7 +377,7 @@
         return { bands: bands, sheetH: H / ppi, ppi: ppi };
     }
 
-    function buildFromSheet(job, jsPDF) {
+    function buildFromSheet(job, PDFLib) {
         var W = num(job.sheetW, 22);
         return loadImage(job.sheet).then(function (img) {
             var scan = scanInkBands(img, W), ppi = scan.ppi;
@@ -328,9 +394,15 @@
                     return canvasToBytes(c).then(function (bytes) {
                         c.width = c.height = 0;
                         var hIn = rows / ppi;
-                        var pdf = new jsPDF({ orientation: hIn >= W ? 'portrait' : 'landscape', unit: 'in', format: [W, hIn], compress: true });
-                        pdf.addImage(bytes, 'PNG', 0, 0, W, hIn, undefined, 'FAST');
-                        docs.push({ pdf: pdf, page: { top: page.top, h: hIn, items: page.items, oversize: hIn > MAX_PAGE_IN + EPS } });
+                        return PDFLib.PDFDocument.create().then(function (doc) {
+                            var pg = doc.addPage([W * 72, hIn * 72]);
+                            return doc.embedPng(bytes).then(function (im) {
+                                pg.drawImage(im, { x: 0, y: 0, width: W * 72, height: hIn * 72 });
+                                return doc.save();
+                            });
+                        }).then(function (outBytes) {
+                            docs.push({ bytes: outBytes, page: { top: page.top, h: hIn, items: page.items, oversize: hIn > MAX_PAGE_IN + EPS } });
+                        });
                     });
                 });
             });
@@ -346,8 +418,8 @@
 
     function run(job, ui) {
         function status(html) { if (ui.status) ui.status.innerHTML = html; }
-        var jsPDF = root.jspdf && root.jspdf.jsPDF;
-        if (!jsPDF) { status('&#x274C; The PDF library did not load. Check the connection and reload this page.'); return; }
+        var PDFLib = root.PDFLib;
+        if (!PDFLib || !PDFLib.PDFDocument) { status('&#x274C; The PDF library did not load. Check the connection and reload this page.'); return; }
 
         var plan = planFromJob(job), note = '', fromSheet = false;
         var work;
@@ -362,7 +434,7 @@
                         note = 'This order was placed before layouts were saved, so its pieces were re-laid onto rows. '
                              + 'Every piece and copy count is the same as the order, but the arrangement differs from the customer preview.';
                     }
-                    return buildPdfs(plan, { jsPDF: jsPDF, getArt: makeArtLoader(zip) }, function (k, n) {
+                    return buildPdfs(plan, { PDFLib: PDFLib, getArt: makeArtLoader(zip) }, function (k, n) {
                         status('&#x1F4C4; Building PDF ' + (k + 1) + ' of ' + n + '&hellip;');
                     });
                 })
@@ -372,13 +444,13 @@
                          + 'That image may be well under 300 DPI on a long sheet.';
                     status('&#x23F3; Falling back to the combined sheet image&hellip;');
                     fromSheet = true;
-                    return buildFromSheet(job, jsPDF);
+                    return buildFromSheet(job, PDFLib);
                 });
         } else if (job.sheet) {
             status('&#x23F3; Loading the sheet image&hellip;');
             note = 'This order has no production ZIP, so the PDF comes from the combined sheet image at whatever resolution it was saved.';
             fromSheet = true;
-            work = buildFromSheet(job, jsPDF);
+            work = buildFromSheet(job, PDFLib);
         } else {
             status('&#x274C; This order has no production files.');
             return;
@@ -387,7 +459,7 @@
         return work.then(function (res) {
             var names = fileNames(job.name, res.docs.length), html = '', links = [];
             res.docs.forEach(function (d, i) {
-                var blob = d.pdf.output('blob'), url = URL.createObjectURL(blob);
+                var blob = new Blob([d.bytes], { type: 'application/pdf' }), url = URL.createObjectURL(blob);
                 links.push({ url: url, name: names[i] });
                 html += '<li style="margin:6px 0"><a href="' + url + '" download="' + esc(names[i]) + '" style="font-weight:bold">'
                       + '&#x1F4C4; ' + esc(names[i]) + '</a> <span style="color:#666">22 &times; ' + d.page.h.toFixed(2) + ' in'
@@ -398,6 +470,8 @@
             if (ui.list) ui.list.innerHTML = html;
             var msg = '&#x2713; ' + (res.docs.length === 1 ? 'PDF ready.' : res.docs.length + ' PDFs ready. The sheet was longer than one PDF page allows, so it was split between pieces.');
             if (isFinite(res.lowDpi)) msg += ' Lowest art resolution: <strong>' + Math.round(res.lowDpi) + ' DPI</strong>.';
+            if (res.passthrough) msg += ' <strong>' + res.passthrough + '</strong> piece' + (res.passthrough === 1 ? '' : 's')
+                                      + ' placed as the customer\'s original PDF, at full resolution.';
             if (note) msg += '<br><span style="color:#8a6100">' + note + '</span>';
             msg += '<br><span style="color:#666;font-size:13px">If your browser asks to allow multiple downloads, allow it, or click each file below.</span>';
             status(msg);

@@ -1185,6 +1185,12 @@ jQuery(function($){
     var RESIZE_EDGE_IN = 0.18;
 
     var designs = [];
+    // Original uploaded PDF bytes, kept so the customer's file itself can be
+    // placed into the production PDF instead of a picture of it. Keyed, not
+    // stored on the design, so undo snapshots and saved sheets carry a short
+    // string rather than megabytes of base64 each time anything moves.
+    var pdfSources = {};      // key -> base64 of the whole uploaded PDF
+    var nextPdfKey  = 1;
     var nextId  = 0;
     var zoom = 1.0;
 
@@ -1950,13 +1956,18 @@ jQuery(function($){
             };
         });
         return {
-            v: 4,
+            // v5 carries pdfSources. A v4 sheet reopens without them and its
+            // PDF pieces fall back to the raster, which is what it was saved
+            // with - it is not silently downgraded, it never had the original.
+            v: 5,
+            pdfSources: pdfSources,
             designs: designs.map(function(d){
                 return {
                     name:d.name, dataUrl:d.dataUrl, nW:d.nW, nH:d.nH,
                     widthIn:d.widthIn, heightIn:d.heightIn, qty:d.qty,
                     locked:d.locked, rotated:d.rotated, rotLock:d.rotLock, hasAlpha:d.hasAlpha,
-                    batchId: d.batchId || null
+                    batchId: d.batchId || null,
+                    srcPdfKey: d.srcPdfKey || null, srcPdfPage: d.srcPdfPage || 0
                 };
             }),
             layout: { anchors: anchors },
@@ -3090,7 +3101,8 @@ jQuery(function($){
                     id:d.id, name:d.name, dataUrl:d.dataUrl, nW:d.nW, nH:d.nH,
                     widthIn:d.widthIn, heightIn:d.heightIn, qty:d.qty,
                     locked:d.locked, rotated:d.rotated, rotLock:d.rotLock, hasAlpha:d.hasAlpha,
-                    batchId: d.batchId || null
+                    batchId: d.batchId || null,
+                    srcPdfKey: d.srcPdfKey || null, srcPdfPage: d.srcPdfPage || 0
                 };
             }),
             batches: batches.map(function(b){
@@ -3142,7 +3154,8 @@ jQuery(function($){
                 id:d.id, name:d.name, dataUrl:d.dataUrl, imgEl:null,
                 nW:d.nW, nH:d.nH, widthIn:d.widthIn, heightIn:d.heightIn,
                 qty:d.qty, locked:d.locked, rotated:d.rotated, rotLock:!!d.rotLock, hasAlpha:d.hasAlpha,
-                batchId: d.batchId || null
+                batchId: d.batchId || null,
+                srcPdfKey: d.srcPdfKey || null, srcPdfPage: d.srcPdfPage || 0
             };
         });
 
@@ -3520,7 +3533,7 @@ jQuery(function($){
         };
     }
 
-    function addDesignFromImage(name, dataUrl, img, hasAlpha, srcDpi) {
+    function addDesignFromImage(name, dataUrl, img, hasAlpha, srcDpi, srcPdfKey, srcPdfPage) {
         var did = nextId++;
         var nW = img.naturalWidth;
         var nH = img.naturalHeight;
@@ -3530,7 +3543,11 @@ jQuery(function($){
             nW: nW, nH: nH,
             widthIn: size.w, heightIn: size.h,
             qty: 1, locked: true, rotated: false, rotLock: false,
-            hasAlpha: hasAlpha, batchId: null
+            hasAlpha: hasAlpha, batchId: null,
+            // When these are set the raster above is PREVIEW ONLY. Production
+            // uses the original PDF page they point at.
+            srcPdfKey: srcPdfKey || null,
+            srcPdfPage: srcPdfPage || 0
         });
     }
 
@@ -3656,6 +3673,12 @@ jQuery(function($){
                 var reader = new FileReader();
                 reader.onload = function(){
                     var typed = new Uint8Array(reader.result);
+                    // Keep the file itself BEFORE pdf.js touches the buffer.
+                    // The raster below is only so the piece can be laid out on
+                    // screen; the production PDF places these bytes verbatim.
+                    var pdfKey = 'p' + (nextPdfKey++);
+                    try { pdfSources[pdfKey] = btgsbBytesToBase64(typed.slice().buffer); }
+                    catch (e) { pdfKey = null; }
                     pdfjsLib.getDocument({ data: typed }).promise.then(function(pdf){
                         var pageJobs = [];
                         for (var pn = 1; pn <= pdf.numPages; pn++) {
@@ -3705,7 +3728,7 @@ jQuery(function($){
                                                     // point space, so canvas px / targetDpi is the
                                                     // page's real size in inches, and targetDpi is
                                                     // the resolution the art really is.
-                                                    addDesignFromImage(name, dataUrl, img, hasAlpha, targetDpi);
+                                                    addDesignFromImage(name, dataUrl, img, hasAlpha, targetDpi, pdfKey, pageNum);
                                                     res();
                                                 };
                                                 img.onerror = function(){ res(); };
@@ -3793,6 +3816,14 @@ jQuery(function($){
     });
 
     /* -- Production-file helpers --------------------------------- */
+    function btgsbBytesToBase64(buf) {
+        var bytes = new Uint8Array(buf), CH = 0x8000, out = [];
+        for (var i = 0; i < bytes.length; i += CH) {
+            out.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CH)));
+        }
+        return btoa(out.join(''));
+    }
+
     function btgsbSafeName(s) {
         var out = String(s == null ? 'design' : s)
             .replace(/[^A-Za-z0-9._-]+/g, '_')
@@ -3840,10 +3871,24 @@ jQuery(function($){
                 var fname = ('0' + (i + 1)).slice(-2) + '_' + base + '_x' + qty + '.png';
                 if (used[fname]) fname = ('0' + (i + 1)).slice(-2) + '_' + base + '_' + i + '_x' + qty + '.png';
                 used[fname] = true;
-                manifest.push({
+                var row = {
                     file: fname, design: d.name, original: d.name,
                     w: d.widthIn.toFixed(2), h: d.heightIn.toFixed(2), qty: qty
-                });
+                };
+                manifest.push(row);
+
+                // A piece that came from a PDF also ships its ORIGINAL page.
+                // The PNG beside it stays for preview and for anything that
+                // cannot read a PDF, but production places this file itself,
+                // so nothing the customer drew is ever re-rendered.
+                if (d.srcPdfKey && pdfSources[d.srcPdfKey]) {
+                    var pdfName = fname.replace(/\.png$/i, '') + '.pdf';
+                    row.pdf     = pdfName;
+                    row.pdfPage = d.srcPdfPage || 1;
+                    try { zip.file(pdfName, pdfSources[d.srcPdfKey], { base64: true }); }
+                    catch (e) { delete row.pdf; delete row.pdfPage; }
+                }
+
                 var dpi  = Math.max(1, Math.round(d.nW / Math.max(0.01, d.widthIn)));
                 var blob = btgsbDataUrlToBlob(d.dataUrl);
                 return injectPngDpi(blob, dpi)
@@ -4075,6 +4120,12 @@ jQuery(function($){
         var indexToId = [];
         designs = [];
         nextId = 0;
+        pdfSources = (payload.pdfSources && typeof payload.pdfSources === 'object') ? payload.pdfSources : {};
+        nextPdfKey = 1;
+        Object.keys(pdfSources).forEach(function(k){
+            var n = parseInt(String(k).replace(/^p/, ''), 10);
+            if (isFinite(n) && n >= nextPdfKey) nextPdfKey = n + 1;
+        });
         payload.designs.forEach(function(pd, i){
             var did = nextId++;
             indexToId[i] = did;
@@ -4082,7 +4133,8 @@ jQuery(function($){
                 id: did, name: pd.name, dataUrl: pd.dataUrl, imgEl: null,
                 nW: pd.nW, nH: pd.nH, widthIn: pd.widthIn, heightIn: pd.heightIn,
                 qty: pd.qty, locked: pd.locked, rotated: pd.rotated, rotLock: !!pd.rotLock, hasAlpha: pd.hasAlpha,
-                batchId: (pd.batchId === null || pd.batchId === undefined) ? null : pd.batchId
+                batchId: (pd.batchId === null || pd.batchId === undefined) ? null : pd.batchId,
+                srcPdfKey: pd.srcPdfKey || null, srcPdfPage: pd.srcPdfPage || 0
             });
         });
 

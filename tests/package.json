@@ -1,0 +1,11 @@
+{
+  "name": "bt-dtf-tests",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "jszip": "3.10.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "4.0.379",
+    "playwright": "^1.40.0"
+  }
+}

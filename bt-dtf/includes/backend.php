@@ -783,7 +783,7 @@ function btdtf_render_pdf_download_page() {
         <ul id="btgsb-pdf-list" style="list-style:none;margin:10px 0 0;padding:0;font-size:15px"></ul>
         <p style="font-size:13px;color:#666;margin-top:30px;line-height:1.5">Built in your browser from the order's production files. A PDF page tops out at 200 inches, so a longer sheet comes out as several PDFs, split between pieces and never through one. Once the downloads finish you can close this tab.</p>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="<?php echo esc_url(BTDTF_URL . 'assets/pdf-lib.min.js?ver=' . BTDTF_VERSION); ?>"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="<?php echo esc_url(BTDTF_URL . 'assets/pdf-export.js?ver=' . BTDTF_VERSION); ?>"></script>
     <script>
@@ -1440,7 +1440,7 @@ function btdtf_register_hooks() {
                       || (isset($_GET['page']) && $_GET['page'] === 'wc-orders');
         if (!$on_order_page) return;
         $libs = [
-            'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+            BTDTF_URL . 'assets/pdf-lib.min.js?ver=' . BTDTF_VERSION,
             'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
             BTDTF_URL . 'assets/pdf-export.js?ver=' . BTDTF_VERSION,
         ];
