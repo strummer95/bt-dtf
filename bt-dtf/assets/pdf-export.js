@@ -25,8 +25,10 @@
     'use strict';
 
     var MAX_PAGE_IN = 200;         // PDF page height ceiling, 14,400 pt
-    var MAX_ART_DPI = 600;         // above this a piece is resampled down to it
-    var MAX_ART_PX  = 100000000;   // per-piece canvas budget, ~100 MP
+    // HARD RULE: a piece is never resampled. There is deliberately no DPI
+    // ceiling and no pixel budget here. The old MAX_ART_DPI = 600 quietly
+    // resampled anything sharper down to 600 DPI inside the production PDF
+    // itself - the file that goes to the press. Removed.
     var EPS = 1e-6;
 
     function num(v, d) { var n = parseFloat(v); return isFinite(n) ? n : d; }
@@ -193,6 +195,18 @@
 
     /* -- Browser side -------------------------------------------------- */
 
+    // Ask for the full size and confirm we got it. Never silently smaller.
+    function allocCanvas(w, h) {
+        if (!(w > 0) || !(h > 0)) return null;
+        var c = document.createElement('canvas');
+        try { c.width = w; c.height = h; } catch (e) { return null; }
+        if (c.width !== w || c.height !== h) return null;
+        var ctx = c.getContext('2d');
+        if (!ctx) return null;
+        try { ctx.getImageData(0, 0, 1, 1); } catch (e) { return null; }
+        return c;
+    }
+
     function canvasToBytes(c) {
         return new Promise(function (resolve, reject) {
             c.toBlob(function (b) {
@@ -247,12 +261,16 @@
             return blobs[file].then(decodeBlob).then(function (img) {
                 var nW = img.naturalWidth, nH = img.naturalHeight;
                 var rot = (r === 'auto') ? shouldRotate(nW, nH, wIn, hIn) : !!r;
-                var artW = rot ? hIn : wIn, artH = rot ? wIn : hIn;   // art size before turning
-                var s = Math.min(1, artW * MAX_ART_DPI / nW, artH * MAX_ART_DPI / nH, Math.sqrt(MAX_ART_PX / (nW * nH)));
-                var sw = Math.max(1, Math.round(nW * s)), sh = Math.max(1, Math.round(nH * s));
-                var c = document.createElement('canvas');
-                c.width  = rot ? sh : sw;
-                c.height = rot ? sw : sh;
+                // Every pixel the file holds goes into the PDF. No scale factor.
+                var sw = nW, sh = nH;
+                var c = allocCanvas(rot ? sh : sw, rot ? sw : sh);
+                if (!c) {
+                    throw new Error(
+                        file + ' is ' + nW + ' \u00d7 ' + nH + ' pixels, which this browser cannot ' +
+                        'open in one piece. Nothing was reduced and no PDF was written. Open this ' +
+                        'order on a machine with more memory, or send the piece as a smaller file.'
+                    );
+                }
                 var ctx = c.getContext('2d');
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';

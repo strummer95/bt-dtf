@@ -3634,6 +3634,22 @@ jQuery(function($){
         }).catch(function(){ return 0; });
     }
 
+    // HARD RULE: customer art is never reduced. Nothing in the builder or the
+    // export is allowed to hand back fewer pixels than the file holds. Where a
+    // canvas is needed we ask for the full size and check we actually got it;
+    // if the browser refuses, the caller stops and says so by name. It never
+    // falls back to a smaller render.
+    function btgsbAllocCanvas(w, h) {
+        if (!(w > 0) || !(h > 0)) return null;
+        var c = document.createElement('canvas');
+        try { c.width = w; c.height = h; } catch (e) { return null; }
+        if (c.width !== w || c.height !== h) return null;
+        var ctx = c.getContext('2d');
+        if (!ctx) return null;
+        try { ctx.getImageData(0, 0, 1, 1); } catch (e) { return null; }
+        return c;
+    }
+
     function loadPdfFile(file) {
         return ensurePdfJs().then(function(pdfjsLib){
             return new Promise(function(resolve, reject){
@@ -3653,24 +3669,24 @@ jQuery(function($){
                                             ? Math.min(1200, Math.max(36, Math.round(nativeDpi)))
                                             : 300;
 
-                                        // Browser canvas ceilings. Going over them gives a
-                                        // blank canvas, so drop the DPI instead and let the
-                                        // piece report the resolution it really came out at.
-                                        var base = page.getViewport({ scale: 1 });
-                                        var pxW  = base.width  * targetDpi / 72;
-                                        var pxH  = base.height * targetDpi / 72;
-                                        var fit  = Math.min(
-                                            1,
-                                            16384 / pxW,
-                                            16384 / pxH,
-                                            Math.sqrt(40e6 / Math.max(1, pxW * pxH))
-                                        );
-                                        if (fit < 1) targetDpi = Math.max(36, Math.floor(targetDpi * fit));
-
+                                        // The page is rasterized at its OWN resolution. There is
+                                        // no ceiling here any more: the old code capped the raster
+                                        // at 40MP and cut the DPI to fit, which silently handed back
+                                        // art coarser than the customer supplied. A 22x30 page at
+                                        // 300 came out at 246. That is a downscale and it is banned.
                                         var viewport = page.getViewport({ scale: targetDpi / 72 });
-                                        var canvas = document.createElement('canvas');
-                                        canvas.width  = Math.round(viewport.width);
-                                        canvas.height = Math.round(viewport.height);
+                                        var wantW = Math.round(viewport.width);
+                                        var wantH = Math.round(viewport.height);
+                                        var canvas = btgsbAllocCanvas(wantW, wantH);
+                                        if (!canvas) {
+                                            throw new Error(
+                                                file.name + ' is ' + wantW + ' \u00d7 ' + wantH +
+                                                ' pixels at its own ' + targetDpi + ' DPI, which this browser ' +
+                                                'cannot open in one piece. Nothing was reduced and nothing was ' +
+                                                'added to the sheet. Send this design as a PNG, or split it into ' +
+                                                'separate pages, and it will go through at full resolution.'
+                                            );
+                                        }
                                         var ctx = canvas.getContext('2d');
                                         ctx.clearRect(0, 0, canvas.width, canvas.height);
                                         return page.render({
