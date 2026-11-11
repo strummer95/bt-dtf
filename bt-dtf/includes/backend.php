@@ -371,6 +371,79 @@ function btdtf_ensure_png_dpi($file_path, $dpi) {
 // number) plus the per-design list with x{qty} copy counts. When the
 // combined full-sheet PNG/PDF was not generated (sheet too large to render
 // as one image), it shows an explanatory note instead of an error.
+/* ── Production files are served BY the plugin, not by public URL ───── */
+// The sheet and the ZIP used to be fetched from their public upload URL.
+// That only works when the page and the file agree on scheme and host, and
+// a WordPress whose "WordPress Address" and "Site Address" differ (http vs
+// https, which a server move leaves behind) breaks that agreement: the
+// browser calls it cross-origin, refuses the download attribute, and
+// refuses the canvas read the PDF is built from. There is no URL we can
+// write that survives every combination.
+//
+// So we stop guessing. These two run the request back through WordPress at
+// a ROOT-RELATIVE path, which is same-origin by construction whatever the
+// options say, read the file off local disk, and stream it. Restricted to
+// shop managers, and the path is derived from the order's own meta and
+// confined to the uploads directory - never from anything the caller sends.
+
+function btdtf_file_proxy_url($oid, $which) {
+    $path = wp_parse_url(admin_url('admin-ajax.php'), PHP_URL_PATH);
+    if (!$path) $path = '/wp-admin/admin-ajax.php';
+    return $path . '?' . http_build_query([
+        'action' => 'btdtf_file',
+        'oid'    => (int) $oid,
+        'which'  => $which === 'zip' ? 'zip' : 'sheet',
+        'nonce'  => wp_create_nonce('btdtf_file'),
+    ]);
+}
+
+// A stored upload URL -> the real file on disk, or '' if it is not inside
+// the uploads directory. Only the PATH is used, so a stale scheme or host
+// in the saved URL does not matter.
+function btdtf_upload_path_for_url($url) {
+    if (!$url) return '';
+    $up = wp_upload_dir();
+    if (empty($up['basedir']) || empty($up['baseurl'])) return '';
+    $base = wp_parse_url($up['baseurl'], PHP_URL_PATH);
+    $path = wp_parse_url($url, PHP_URL_PATH);
+    if (!$base || !$path || strpos($path, $base) !== 0) return '';
+    $rel = ltrim(substr($path, strlen($base)), '/');
+    if ($rel === '' || strpos($rel, '..') !== false) return '';
+    $real     = realpath(rtrim($up['basedir'], '/') . '/' . rawurldecode($rel));
+    $realbase = realpath($up['basedir']);
+    if (!$real || !$realbase || strpos($real, $realbase . DIRECTORY_SEPARATOR) !== 0) return '';
+    return $real;
+}
+
+add_action('wp_ajax_btdtf_file', function () {
+    if (!current_user_can('manage_woocommerce')) { status_header(403); exit; }
+    if (!check_ajax_referer('btdtf_file', 'nonce', false)) { status_header(403); exit; }
+
+    $oid   = isset($_GET['oid']) ? absint($_GET['oid']) : 0;
+    $which = (isset($_GET['which']) && $_GET['which'] === 'zip') ? 'zip' : 'sheet';
+    $order = ($oid && function_exists('wc_get_order')) ? wc_get_order($oid) : null;
+    if (!$order) { status_header(404); exit; }
+
+    $job  = btdtf_pdf_job_for_order($order);
+    $path = btdtf_upload_path_for_url($which === 'zip' ? $job['zip'] : $job['sheet']);
+    if (!$path || !is_readable($path)) { status_header(404); exit; }
+
+    $no = preg_replace('/[^A-Za-z0-9_-]/', '', (string) $order->get_order_number());
+    if ($no === '') $no = 'gang-sheet';
+
+    nocache_headers();
+    status_header(200);
+    header('Content-Type: ' . ($which === 'zip' ? 'application/zip' : 'image/png'));
+    header('Content-Length: ' . filesize($path));
+    header('X-Content-Type-Options: nosniff');
+    if ($which === 'zip') {
+        header('Content-Disposition: attachment; filename="' . $no . '-production-files.zip"');
+    }
+    if (function_exists('wp_ob_end_flush_all')) wp_ob_end_flush_all();
+    readfile($path);
+    exit;
+});
+
 /* ── Stored file URLs follow the site ────────────────────────────────── */
 // Sheet and ZIP URLs are absolute and are written into the order when the
 // file is uploaded, so they keep whatever scheme and host the site had that
@@ -451,7 +524,10 @@ function btdtf_production_files_html($order, $context) {
                       . 'padding:10px 18px;text-decoration:none;border-radius:5px;font-weight:bold">&#x1F4C4; Download PDF</a>';
             }
         } else {
-            $out .= '<a href="'.esc_url($zip_url).'" download="'.esc_attr($zip_name).'" '
+            $zip_href = (method_exists($order, 'get_id'))
+                ? btdtf_file_proxy_url($order->get_id(), 'zip')
+                : esc_url($zip_url);
+            $out .= '<a href="'.esc_attr($zip_href).'" download="'.esc_attr($zip_name).'" '
                   . 'style="font-weight:bold;text-decoration:none">Download Individual Files (ZIP)</a>';
             if ($pdf_link) {
                 $out .= ' &nbsp; ' . btdtf_pdf_inline_link($order);
@@ -731,6 +807,13 @@ function btdtf_pdf_job_payload($order, $fallback_sheet = '', $fallback_name = ''
     if (!btdtf_is_upload_url($job['sheet'])) $job['sheet'] = '';
     if (!$job['manifest']) $job['zip'] = '';
     if (!$job['zip'] && !$job['sheet']) return null;
+
+    // Hand the browser same-origin URLs it can always reach.
+    if ($order && method_exists($order, 'get_id')) {
+        $oid_for_files = $order->get_id();
+        if ($job['zip'])   $job['zip']   = btdtf_file_proxy_url($oid_for_files, 'zip');
+        if ($job['sheet']) $job['sheet'] = btdtf_file_proxy_url($oid_for_files, 'sheet');
+    }
 
     $s = get_option(BTDTF_OPT, btdtf_defaults());
     $job['name']    = $name !== '' ? $name : 'gang-sheet';
@@ -1372,7 +1455,7 @@ function btdtf_register_hooks() {
     
         echo '<div class="btgsb-admin-files" style="margin-top:10px;padding:10px;background:#f0eff8;border:1px solid #d0cff0;border-radius:5px;font-size:13px">';
         if ($sheet_url) {
-            $u = esc_url($sheet_url);
+            $u = (!empty($oid)) ? esc_attr(btdtf_file_proxy_url($oid, 'sheet')) : esc_url($sheet_url);
             echo '<div style="margin-bottom:6px"><strong style="color:#27267e">Production Sheet</strong></div>';
             echo '<a href="'.$u.'" target="_blank" download="'.esc_attr($dl_base).'.png" style="font-weight:bold;margin-right:14px;text-decoration:none">&#x1F4E5; Download PNG</a>';
             if (!empty($oid) && !empty($ord)) {
